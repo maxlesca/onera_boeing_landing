@@ -1,0 +1,25 @@
+model_path: "mlp_epoch=19_val_loss=0.003130.ckpt"  # Saved checkpoint/config stem from training
+
+dataset:  # Test dataset selection
+  desired_trajectories: 1
+  test_path: datasets/hover_dataset_test.npz
+
+trajectory_plotter: false  # Plot the first trajectory after evaluation
+sensitivity_analysis: true  # Evaluate the whole test set instead of a single random subset
+
+dataloader:  # Test-time loader settings
+  batch_size: 1
+  num_workers: 8
+  pin_memory: false
+  drop_last: true
+
+ablation:  # Automated feature ablation suite
+  enabled: true
+  fill_value: 0.0
+  feature_sets:
+    position: [dx, dy, dz]
+    velocity: [vx, vy, vz]
+    attitude: [phi, theta, psi]
+    angular_rate: [p, q, r]
+    disturbance: [Mx_ext, My_ext, Mz_ext]
+    rotor_speed: [omega]

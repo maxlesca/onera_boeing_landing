@@ -1,0 +1,62 @@
+training:  # Lightning training hyperparameters
+  max_epochs: 20
+  lr: 0.001
+  logger: false
+  seed: 42
+  wandb_project: Autonomous-Quadrotor-Training
+
+dataset:  # Dataset labels and preprocessing flags
+  input_labels: [dx, dy, dz, vx, vy, vz, phi, theta, psi, p, q, r, Mx_ext, My_ext, Mz_ext, omega]
+  output_labels: [u]
+  train_path: datasets/hover_dataset_train.npz
+  val_path: datasets/hover_dataset_val.npz
+  normalized: true
+  with_noise: false
+  with_bias: false
+  with_delay: false
+  delay_steps: 2
+
+train_ablation:  # Training-time feature removal; persisted into saved configs/checkpoint names
+  enabled: false
+  remove_feature_groups: []  # Example: [velocity]
+  remove_features: []  # Example: [phi, theta]
+
+mlp_block:  # Optional feature MLP before the recurrent controller
+  value: false
+  no_layers: [64, 128, 128, 256]
+
+conv_block:  # Optional convolutional feature extractor
+  value: false
+  output_dim: 256
+
+sequencing:  # Sliding-window extraction for history-based models
+  value: true
+  seq_len: 1
+
+dataloader:  # Shared loader settings for train/validation
+  batch_size: 32
+  num_workers: 8
+  pin_memory: false
+  drop_last: true
+
+model:  # Core controller definition
+  type: mlp          # cfc | ltc | ncp | ctrnn | simplernn | gru | lstm | mlp
+  no_neurons_layer: 64
+  ode_unfolds: 6
+  cfc_mode: default  # default | pure | no_gate
+  ncp:
+    inter_neurons: 32
+    command_neurons: 24
+    sensory_fanout: 20
+    inter_fanout: 16
+    recurrent_command_synapses: 16
+    motor_fanin: 20
+  backbone_units: 128
+  backbone_layers: 1
+  backbone_dropout: 0.0
+  activation: relu
+  mixed_memory: false
+  scale_factor: 1.0
+  hidden_layers: [120, 120, 120]  # Used only when model.type == mlp
+
+checkpoint_name: null  # Optional manual checkpoint stem override
