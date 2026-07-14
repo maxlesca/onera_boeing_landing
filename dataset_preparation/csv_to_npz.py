@@ -8,8 +8,9 @@ rôle ②), + run et temps pour reconstruire les séquences du CfC.
 Décisions encodées ici (DOC §8.4 et §10.1) :
   - ENTRÉES ① = attitude, vitesses angulaires, vitesses corps et NED,
     déviations ILS (en mètres). PAS la position vraie ni le vent (rôle ③).
-  - LABELS  ② = longitudinal (profondeur), lateral (ailerons), throttle_left
-    (= right partout). PAS directional (constant 0).
+  - LABELS  ② = TOUTES les commandes : longitudinal (profondeur), lateral
+    (ailerons), directional (palonnier — constant 0 dans ce dataset), stabilizer
+    (trim), throttle_left (= right partout, une seule colonne).
   - Les lignes sans état (NaN) sont écartées et comptées.
   - ⚠️ Découpage train/val PAR RUN, jamais par frames aléatoires : deux frames
     consécutives sont quasi identiques -> les mélanger mettrait "presque le
@@ -34,7 +35,12 @@ ENTREES = ["pitch", "bank", "heading", "p", "q", "r", "u", "v", "w",
            "northsouth_velocity", "eastwest_velocity", "vertical_velocity",
            "localizer_error_m", "glideslope_error_m"]
 COLONNES_ILS = ["localizer_error_m", "glideslope_error_m"]   # retirées par --sans-ils
-LABELS = ["longitudinal", "lateral", "throttle_left"]
+# TOUTES les commandes enregistrées (choix : ne rien exclure).
+# NB dataset actuel : directional constant = 0 (le réseau apprendra « 0 » —
+# sans coût, et le pipeline est prêt pour un futur dataset avec vent de
+# travers) ; stabilizer = trim 0/1 ; throttle_left == throttle_right (une
+# seule colonne suffit).
+LABELS = ["longitudinal", "lateral", "directional", "stabilizer", "throttle_left"]
 
 
 def charger_csv(chemin: Path) -> pd.DataFrame:
@@ -89,7 +95,7 @@ def main():
 
     for nom, part in [("train", train), ("val", df[masque_val])]:
         np.savez_compressed(
-            sortie / f"atterrissage_{nom}.npz",
+            sortie / f"landing_{nom}.npz",
             X=part[ENTREES].to_numpy(np.float32),         # (N, 14) entrées BRUTES
             Y=part[LABELS].to_numpy(np.float32),          # (N, 3)  labels BRUTS
             run=part["run"].to_numpy(np.int32),           # pour reconstruire les séquences
@@ -102,12 +108,12 @@ def main():
         )
         runs_ici = sorted(part["run"].unique())
         print(f"  {nom}: {len(part):6d} paires, runs {runs_ici} "
-              f"-> {sortie / f'atterrissage_{nom}.npz'}")
+              f"-> {sortie / f'landing_{nom}.npz'}")
 
-    (sortie / "bornes_normalisation.json").write_text(
+    (sortie / "normalization_bounds.json").write_text(
         json.dumps(bornes, indent=2), encoding="utf-8")
-    print("Bornes de normalisation (train seul) -> bornes_normalisation.json")
-    print("\nRelecture type :  d = np.load('atterrissage_train.npz', allow_pickle=True)")
+    print("Bornes de normalisation (train seul) -> normalization_bounds.json")
+    print("\nRelecture type :  d = np.load('landing_train.npz', allow_pickle=True)")
     print("                  X_norm = (d['X'] - d['x_min']) / (d['x_max'] - d['x_min'] + 1e-10)")
 
 

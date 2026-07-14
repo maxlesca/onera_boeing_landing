@@ -26,6 +26,8 @@ Décisions encodées (DOC §9.8 / §8.4) :
       coins GELÉS à la dernière valeur (0.5 = centre avant toute détection).
     - capteurs/labels : normalisés avec LES BORNES EMBARQUÉES DANS LE NPZ
       (contrat n°2, DOC §7.7.1 — aucune table dupliquée ici).
+    - labels = les 5 commandes du npz (longitudinal, lateral, directional,
+      stabilizer, throttle_left — rien n'est exclu ; l'ordre vient du npz).
     - le découpage train/val par run est déjà fait DANS les npz.
 """
 

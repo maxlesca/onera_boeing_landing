@@ -28,7 +28,8 @@ dataset:
   normalized: true
   # entrées = [10 canaux vision : 8 coins normalisés + confiance + validité]
   #           + [12 capteurs du npz : attitude, p/q/r, vitesses corps et NED]
-  # sorties = [longitudinal, lateral, throttle_left]  (l'ordre vient du npz)
+  # sorties = les 5 commandes du npz : longitudinal, lateral, directional,
+  #           stabilizer, throttle_left (rien n'est exclu — l'ordre vient du npz)
 
 # pas de pré-traitement : les coins bruts entrent directement (DOC §9.8)
 mlp_block:
