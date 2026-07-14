@@ -1,0 +1,3 @@
+[submodule "modeles_lard"]
+	path = modeles_lard
+	url = https://github.com/deel-ai-papers/Yolo_models_LARD_V2
