@@ -1,0 +1,39 @@
+# fiche_run_TEMPLATE.yaml — métadonnées d'UN run d'atterrissage (DOC §11.3-6)
+# Copier en fiche_run_XXXX.yaml à côté des images du run, remplir à la génération.
+# Sans cette fiche, le run est inutilisable pour mesurer la couverture (DOC §11.2).
+
+run_id: 0002
+date_generation: 2026-07-02
+genere_par: maxime
+
+simulateur:
+  msfs_version: "1.39.12.0"        # ⚠️ le décor dépend de la version (DOC §10.6-D2)
+  schemin_version: ""
+  avion: "B737"                    # modèle de dynamique utilisé
+
+scenario:
+  aeroport_icao: ""                # ex. LFBO
+  piste: ""                        # ex. 14R
+  meteo: ""                        # CAVOK / pluie / brume / neige / ...
+  heure_locale: ""                 # 06:00 / 12:00 / 19:00 / nuit
+  vent: {direction_deg: 0, vitesse_kt: 0, rafales_kt: 0}
+  pilote: "autopilot_ILS"          # qui tient les commandes
+  offset_initial:                  # écart volontaire au début d'approche
+    lateral_m: 0
+    vertical_m: 0
+  distance_initiale_km: 0
+
+resultat:
+  atterrissage_reussi: true        # garder AUSSI les échecs ! (DOC §11.1-4)
+  commentaire: ""
+
+capture:
+  cadence_hz: 25
+  resolution: [1920, 1080]
+  crop_haut_bas: [0, 0]            # si crop : penser au c_y ! (DOC §10.6-B5)
+  rosbag: ""                       # chemin du bag source
+  topics: []
+
+controle_qualite:
+  rapport_check_dataset: ""        # chemin du rapport (outils/check_dataset.py)
+  statut: "non_verifie"            # non_verifie / vert / anomalies

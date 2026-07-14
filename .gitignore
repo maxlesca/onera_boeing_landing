@@ -1,2 +1,13 @@
 datasets/
 __pycache__/
+# --- ajouts Maxime ---
+datasets/
+resultats/
+images_crop/
+sortie_yolo/
+rapport_dataset*/
+*.zip
+*.npz
+.venv/
+DOC_*.md
+GUIDE_*.md
