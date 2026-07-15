@@ -144,6 +144,7 @@ def main():
 
     sortie = Path("sortie_yolo")
     (sortie / "annotees").mkdir(parents=True, exist_ok=True)
+    (sortie / "non_detectees").mkdir(parents=True, exist_ok=True)   # l'atlas des échecs
     lignes = []
 
     for chemin in images:
@@ -167,6 +168,12 @@ def main():
                 cv2.putText(img, nom[:2].upper(), (int(u) + 8, int(v)),
                             cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 255), 2)
             cv2.imwrite(str(sortie / "annotees" / chemin.name), img)
+        else:
+            # image SANS détection : exportée telle quelle avec un bandeau,
+            # pour voir OÙ le modèle échoue (piste trop lointaine ? occultée ?)
+            cv2.putText(img, "NON DETECTEE", (20, 40),
+                        cv2.FONT_HERSHEY_SIMPLEX, 1.2, (0, 0, 255), 3)
+            cv2.imwrite(str(sortie / "non_detectees" / chemin.name), img)
         lignes.append(ligne)
         print(f"  {chemin.name}: boite={cb} coins={cc}")
 
