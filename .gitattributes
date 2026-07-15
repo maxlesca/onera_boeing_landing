@@ -1,0 +1,10 @@
+# Force LF line endings for all text files, in the repository AND in the
+# working tree, so a checkout living on /mnt/c stays consistent between
+# Git-for-Windows (core.autocrlf=true) and WSL/Linux git (autocrlf unset).
+# Without this, WSL reports every file as modified (CRLF working tree vs LF
+# index) while Git Bash sees them clean — pure noise, not real changes.
+* text=auto eol=lf
+
+# Binary files: never apply text/EOL normalization.
+*.ckpt binary
+*.png  binary
