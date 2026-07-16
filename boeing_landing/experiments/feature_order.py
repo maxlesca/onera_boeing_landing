@@ -4,29 +4,23 @@
 The 1D conv mixes adjacent input channels, so their order matters. This trains
 one run per named order in features.FEATURE_ORDERS and prints a ranking.
 
-    python -m boeing_landing.experiments.feature_order
+    python -m boeing_landing.experiments.feature_order [--config path.yaml]
 """
 
 from __future__ import annotations
 
-import re
+import argparse
 from pathlib import Path
 
 from boeing_landing.data.features import FEATURE_ORDERS
-from boeing_landing.train import train
-
-
-def _val_loss(ckpt: Path) -> float:
-    """Read the checkpoint's val_loss back from its filename."""
-    m = re.search(r"val_loss=([0-9.]+)", ckpt.stem)
-    return float(m.group(1)) if m else float("nan")
+from boeing_landing.train import DEFAULT_CONFIG, PROJECT_ROOT, train, val_loss_from_checkpoint
 
 
 def sweep(config_path: Path, project_root: Path) -> dict[str, float]:
     scores = {}
     for order in FEATURE_ORDERS:
         print(f"\n=== order: {order} ===")
-        scores[order] = _val_loss(train(config_path, project_root, input_order=order))
+        scores[order] = val_loss_from_checkpoint(train(config_path, project_root, input_order=order))
     return scores
 
 
@@ -37,8 +31,10 @@ def report(scores: dict[str, float]) -> None:
 
 
 def main() -> None:
-    root = Path(__file__).resolve().parents[2]  # onera_boeing_landing/
-    report(sweep(root / "boeing_landing/configs/step1_cfc.yaml", root))
+    ap = argparse.ArgumentParser(description=__doc__)
+    ap.add_argument("--config", type=Path, default=DEFAULT_CONFIG)
+    a = ap.parse_args()
+    report(sweep(a.config, PROJECT_ROOT))
 
 
 if __name__ == "__main__":

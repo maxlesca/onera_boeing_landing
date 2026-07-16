@@ -79,6 +79,32 @@ def metrics(yhat: np.ndarray, target: np.ndarray, runtime: np.ndarray) -> dict:
     }
 
 
+def _channel_metrics(err: np.ndarray, truth: np.ndarray) -> dict:
+    """MSE/MAE/RMSE/R2/max-abs-error of one output channel."""
+    mse = float((err ** 2).mean())
+    ss_tot = float(((truth - truth.mean()) ** 2).sum())
+    return {
+        "mse": mse,
+        "mae": float(np.abs(err).mean()),
+        "rmse": float(np.sqrt(mse)),
+        "r2": 1.0 - float((err ** 2).sum()) / ss_tot if ss_tot > 0 else float("nan"),
+        "max_abs_error": float(np.abs(err).max()),
+    }
+
+
+def regression_metrics(yhat: np.ndarray, target: np.ndarray,
+                       labels: list[str] | None = None) -> dict:
+    """Global and per-channel regression metrics, keyed by channel name."""
+    yhat2 = yhat.reshape(-1, yhat.shape[-1])
+    target2 = target.reshape(-1, target.shape[-1])
+    labels = labels or [f"y{i}" for i in range(target2.shape[1])]
+    return {
+        "global": _channel_metrics(yhat2 - target2, target2),
+        "per_channel": {name: _channel_metrics(yhat2[:, i] - target2[:, i], target2[:, i])
+                        for i, name in enumerate(labels)},
+    }
+
+
 def plot_predictions(yhat: np.ndarray, target: np.ndarray, labels: list[str] | None = None) -> None:
     if yhat.ndim == 3:
         yhat = yhat[0]

@@ -16,10 +16,11 @@ boeing_landing/           project code
   data/build_dataset.py     CSV -> npz (GPS in, ILS out, per-run split)
   data/features.py          input/label lists + channel orders for the conv
   data/loader.py            npz -> fixed-length portions -> training tensors
-  configs/step1_cfc.yaml    one pipeline = one config
+  configs/gps_cfc.yaml      one pipeline = one config (single control panel)
   experiments/feature_order.py   sweep conv channel orders
+  experiments/convergence.py     seed-stability study
   train.py                  assemble + fit_and_save (generic, config-driven)
-  evaluate.py               evaluate a run + feature-group ablations
+  evaluate.py               metrics + feature-group ablations of a run
   report.py                 training curves for one run, or several compared
 utils/                    shared library (imported across the repo)
 quadrotor_baseline/       reference quadrotor controller and pretrained models
@@ -54,22 +55,23 @@ runway id). It is not shipped with the repo. Point the build step at it:
 make dataset CSV=path/to/dataset.csv
 ```
 
-This writes `datasets/step1_gps/landing_{train,val}.npz` (inputs = inertial +
-GPS, ILS excluded), split per run with normalisation bounds computed on the
-train split only.
+This writes `landing_{train,val}.npz` into the config's `build.out_dir`
+(inputs = inertial + GPS, ILS excluded), split per run with normalisation
+bounds computed on the train split only.
 
 ## Usage
 
 ```bash
 make                     # list targets
 make dataset CSV=...     # build the npz
-make train               # train the step-1 CfC
+make train               # train the default pipeline (gps_cfc)
 make train ORDER=gps_last            # pick a conv channel order
-make train CONFIG=step1_cfc          # pick a pipeline config
+make train CONFIG=gps_cfc            # pick a pipeline config
 make evaluate RUN=runs/<n>/<ts>      # metrics + feature-group ablations
 make plots RUNS="runs/<n>/<ts>"      # training curves (several RUNS = comparison)
 make plots RUNS="..." SAVE=1         # save PNG instead of showing
-make experiment-order    # sweep channel orders, rank by val_loss
+make experiment-order          # sweep channel orders, rank by val_loss
+make experiment-convergence    # same config, several seeds (stability)
 make quadrotor-train     # train the quadrotor baseline
 make clean               # remove runs/, logs, caches
 ```
@@ -79,7 +81,9 @@ Override the interpreter elsewhere: `make train PYTHON=python`.
 ## Config
 
 Model hyperparameters live in
-[boeing_landing/configs/step1_cfc.yaml](boeing_landing/configs/step1_cfc.yaml).
+[boeing_landing/configs/gps_cfc.yaml](boeing_landing/configs/gps_cfc.yaml).
+The config is the single control panel: model, data, build, evaluation, and
+experiment settings all live there.
 Data knobs:
 
 | Key | Meaning |
@@ -117,8 +121,15 @@ One folder per run, never shared or overwritten:
 runs/<pipeline>_<order>/<timestamp>/
   epoch=NN_val_loss=0.xxxxxx.ckpt   best checkpoint
   config.yaml                        exact resolved config
-  lightning_logs/                    metrics
+  summary.json                       best epoch/val_loss, wall time, n parameters
+  evaluation.json                    regression metrics + ablations (make evaluate)
+  lightning_logs/                    per-step metrics: losses, grad_norm, epoch time
 ```
+
+## Contributing
+
+See [CONTRIBUTING.md](CONTRIBUTING.md): where things live, how to add a
+pipeline / inputs / model / experiment, and the project conventions.
 
 ## Method
 

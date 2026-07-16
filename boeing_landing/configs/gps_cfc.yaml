@@ -1,6 +1,6 @@
-# Step-1 landing controller: inertial + GPS -> Conv1D -> CfC -> commands.
-# Model hyperparameters are a faithful copy of Tudor's conv_cfc_default_n64.
-# Only the dataset section (our data) and num_workers (Windows) differ.
+# gps_cfc pipeline: inertial + GPS -> Conv1D -> CfC -> commands.
+# Single control panel: every tunable lives here. Model hyperparameters are a
+# faithful copy of the quadrotor conv_cfc_default_n64 baseline.
 # Paths are relative to the repo root (run from onera_boeing_landing/).
 
 training:
@@ -13,11 +13,26 @@ training:
   precision: 32              # 32 | 16-mixed (GPU only)
   gradient_clip_val: 0.0     # >0 clips gradients (RNN stability); 0 = off
   early_stopping_patience: 0 # >0 stops after N epochs without val improvement; 0 = off
+  log_every_n_steps: 1       # write metrics.csv every n steps; 0 = no logging at all
+
+# npz build step (make dataset). The source CSV stays a CLI arg (machine-specific).
+build:
+  val_runs: [8]              # runs held out for validation
+  out_dir: ../datasets/gps_no_ils
+
+# run evaluation (make evaluate)
+evaluation:
+  ablation: true             # mask each feature group and re-evaluate
+  fill_value: 0.0            # value written into masked channels
+
+# experiment sweeps
+experiments:
+  seeds: [42, 43, 44]        # convergence study: same config, several inits
 
 dataset:
-  train_npz: ../datasets/step1_gps/landing_train.npz
-  val_npz: ../datasets/step1_gps/landing_val.npz
-  portion_len: 125       # ~5 s at 25 Hz (a landing evolves slower than a hover)
+  train_npz: ../datasets/gps_no_ils/landing_train.npz
+  val_npz: ../datasets/gps_no_ils/landing_val.npz
+  portion_len: 125       # ~5 s at 25 Hz -- the analogue of the quadrotor 200-step trajectory
   stride: 25             # step between portions (~1 s) -> overlap for augmentation
   input_order: grouped   # channel order for the conv (see features.FEATURE_ORDERS)
   normalized: true
@@ -33,15 +48,15 @@ conv_block:
   value: true
   output_dim: 256
 
-# seq_len=1 like Tudor: the conv sees one frame at a time (over the feature axis),
-# the CfC carries memory across the portion.
+# seq_len=1 like the baseline: the conv sees one frame at a time (over the
+# feature axis), the CfC carries memory across the portion.
 sequencing:
   value: true
   seq_len: 1
 
 dataloader:
   batch_size: 32
-  num_workers: 0         # Windows: 0 avoids worker spawn issues (Tudor used 8)
+  num_workers: 0         # Windows: 0 avoids worker spawn issues (baseline used 8)
   pin_memory: false
   drop_last: true
 
@@ -65,4 +80,4 @@ model:
   scale_factor: 1.0
   hidden_layers: [120, 120, 120]  # MLP only (inert for cfc)
 
-checkpoint_name: step1_landing_cfc
+checkpoint_name: gps_cfc

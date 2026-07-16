@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""Build the step-1 training dataset: raw CSV -> npz, per-run train/val split.
+"""Build the training dataset: raw CSV -> npz, per-run train/val split.
 
 Inputs = inertial state + raw GPS (ILS dropped). Labels = flight commands.
 Columns are stored in the canonical order (features.CANONICAL_INPUTS); the
@@ -9,8 +9,10 @@ on the train runs only and embedded in each npz, so they travel with the data.
 Split is per run, never per frame: consecutive frames are near-identical, so a
 random split would leak the validation set into training.
 
+Val runs and output dir come from the pipeline config (`build:` section).
+
 Usage:
-    python -m boeing_landing.data.build_dataset SOURCE [--val-runs 8] [--out DIR]
+    python -m boeing_landing.data.build_dataset SOURCE [--config path.yaml]
     SOURCE = the dataset .zip or the extracted ';'-separated .csv.
 """
 
@@ -102,12 +104,18 @@ def build(source: Path, val_runs: set[int], out_dir: Path) -> None:
 
 
 def main() -> None:
+    from boeing_landing.train import DEFAULT_CONFIG
+    from utils.config import load_yaml
+
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("source", type=Path, help="dataset .zip or extracted .csv")
-    ap.add_argument("--val-runs", default="8", help="comma-separated runs held out for validation")
-    ap.add_argument("--out", type=Path, default=Path("datasets/step1_gps"), help="output directory")
+    ap.add_argument("--config", type=Path, default=DEFAULT_CONFIG,
+                    help="pipeline config holding the build: section")
     a = ap.parse_args()
-    build(a.source, {int(r) for r in a.val_runs.split(",")}, a.out)
+
+    build_cfg = load_yaml(a.config).get("build", {})
+    val_runs = {int(r) for r in build_cfg.get("val_runs", [8])}
+    build(a.source, val_runs, Path(build_cfg.get("out_dir", "../datasets/gps_no_ils")))
 
 
 if __name__ == "__main__":

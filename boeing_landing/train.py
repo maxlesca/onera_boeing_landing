@@ -1,16 +1,19 @@
 # -*- coding: utf-8 -*-
-"""Train the step-1 landing controller (Conv1D -> CfC) on inertial + GPS.
+"""Train a landing controller from a pipeline config (default: gps_cfc).
 
-Reuses Tudor's build_controller_network, Lightning_Model, transform_to_sequence
-and DatasetController unchanged. Only the data source differs
-(boeing_landing.data.loader). Run from the repo root:
+Reuses the shared building blocks (build_controller_network, Lightning_Model,
+transform_to_sequence, DatasetController) unchanged; only the data source is
+landing-specific (boeing_landing.data.loader). Run from the repo root:
 
-    python -m boeing_landing.train --config boeing_landing/configs/step1_cfc.yaml
+    python -m boeing_landing.train --config boeing_landing/configs/gps_cfc.yaml
 """
 
 from __future__ import annotations
 
 import argparse
+import json
+import re
+import time
 from datetime import datetime
 from pathlib import Path
 
@@ -24,6 +27,11 @@ from utils.config import ensure_dir, load_yaml, save_yaml
 from utils.data import DatasetController, transform_to_sequence
 from utils.lightning import Lightning_Model
 from utils.model_builder import build_controller_network
+
+# Single source for the repo root and the default pipeline config; every
+# entrypoint (train, experiments, build) imports these instead of hardcoding.
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+DEFAULT_CONFIG = PROJECT_ROOT / "boeing_landing" / "configs" / "gps_cfc.yaml"
 
 
 def _resolve_order(dataset_cfg: dict) -> list[str]:
@@ -68,7 +76,7 @@ def _inject_labels(config: dict) -> None:
 def _run_dir(project_root: Path, config: dict) -> Path:
     """One folder per run: runs/<name>_<order>/<timestamp>/ -- never shared,
     never overwritten across pipelines/iterations."""
-    base = config.get("checkpoint_name") or "step1"
+    base = config.get("checkpoint_name") or "run"
     order = config["dataset"].get("input_order", "grouped")
     stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     return ensure_dir(project_root / "runs" / f"{base}_{order}" / stamp)
@@ -83,12 +91,31 @@ def assemble(config: dict):
     return Lightning_Model(network, config), train_loader, val_loader
 
 
+class GradNorm(L.Callback):
+    """Log the total L2 gradient norm each step (training-stability signal)."""
+
+    def on_before_optimizer_step(self, trainer, pl_module, optimizer):
+        grads = [p.grad.norm(2) for p in pl_module.parameters() if p.grad is not None]
+        if grads:
+            pl_module.log("grad_norm", torch.stack(grads).norm(2))
+
+
+class EpochTimer(L.Callback):
+    """Log the wall time of every training epoch."""
+
+    def on_train_epoch_start(self, trainer, pl_module):
+        self._t0 = time.time()
+
+    def on_train_epoch_end(self, trainer, pl_module):
+        pl_module.log("epoch_time_s", time.time() - self._t0)
+
+
 def _callbacks(config: dict, run_dir: Path):
-    """Best-val checkpoint into run_dir, plus optional early stopping."""
+    """Best-val checkpoint into run_dir, metric loggers, optional early stopping."""
     checkpoint = ModelCheckpoint(monitor="val_loss", dirpath=str(run_dir),
                                  filename="{epoch:02d}_{val_loss:.6f}",
                                  save_top_k=1, mode="min")
-    cbs = [checkpoint]
+    cbs = [checkpoint, GradNorm(), EpochTimer()]
     patience = int(config["training"].get("early_stopping_patience", 0))
     if patience > 0:
         cbs.append(EarlyStopping(monitor="val_loss", patience=patience, mode="min"))
@@ -98,44 +125,77 @@ def _callbacks(config: dict, run_dir: Path):
 def _trainer(config: dict, run_dir: Path, callbacks) -> L.Trainer:
     """Trainer from the config knobs (hardware, precision, gradient clipping)."""
     t = config["training"]
+    # log_every_n_steps > 0: metrics.csv written at that rate; 0: no logging at
+    # all (checkpointing/early stopping still work, they read metrics in memory)
+    n_log = int(t.get("log_every_n_steps", 1))
+    logging = {"logger": None, "log_every_n_steps": n_log} if n_log > 0 else {"logger": False}
     return L.Trainer(
         max_epochs=int(t["max_epochs"]),
         accelerator=t.get("accelerator", "auto"),
         devices=t.get("devices", 1),
         precision=t.get("precision", 32),
         gradient_clip_val=float(t.get("gradient_clip_val", 0.0)),
-        callbacks=callbacks, logger=None, default_root_dir=str(run_dir))
+        callbacks=callbacks, default_root_dir=str(run_dir), **logging)
+
+
+def _summary(model, trainer, checkpoint, wall_time_s: float) -> dict:
+    """Key facts of a finished run, saved as summary.json next to the checkpoint."""
+    best = Path(checkpoint.best_model_path)
+    epoch = re.search(r"epoch=(\d+)", best.stem)
+    return {
+        "best_val_loss": float(checkpoint.best_model_score),
+        "best_epoch": int(epoch.group(1)) if epoch else None,
+        "epochs_run": int(trainer.current_epoch),
+        "wall_time_s": round(wall_time_s, 1),
+        "n_parameters": sum(p.numel() for p in model.parameters()),
+        "best_checkpoint": best.name,
+    }
 
 
 def fit_and_save(model, train_loader, val_loader, config: dict, project_root: Path) -> Path:
-    """Train `model` into its own run dir (checkpoint + resolved config).
+    """Train `model` into its own run dir (checkpoint + config + summary).
     Generic: any pipeline's entrypoint can reuse this."""
     run_dir = _run_dir(project_root, config)
     callbacks, checkpoint = _callbacks(config, run_dir)
-    _trainer(config, run_dir, callbacks).fit(model, train_loader, val_loader)
+    trainer = _trainer(config, run_dir, callbacks)
+    start = time.time()
+    trainer.fit(model, train_loader, val_loader)
 
     save_yaml(run_dir / "config.yaml", config)
+    summary = _summary(model, trainer, checkpoint, time.time() - start)
+    (run_dir / "summary.json").write_text(json.dumps(summary, indent=2))
     best = Path(checkpoint.best_model_path)
     print(f"run dir: {run_dir}\nbest checkpoint: {best}")
     return best
 
 
-def train(config_path: Path, project_root: Path, input_order: str | None = None) -> Path:
-    """Config -> trained checkpoint. Orchestrates assemble + fit_and_save."""
-    config = load_yaml(config_path)
-    if input_order:
-        config["dataset"]["input_order"] = input_order
+def train_config(config: dict, project_root: Path) -> Path:
+    """Config dict -> trained checkpoint. Orchestrates assemble + fit_and_save."""
     torch.manual_seed(int(config.get("training", {}).get("seed", 42)))
     _inject_labels(config)
     model, train_loader, val_loader = assemble(config)
     return fit_and_save(model, train_loader, val_loader, config, project_root)
 
 
+def train(config_path: Path, project_root: Path = PROJECT_ROOT,
+          input_order: str | None = None) -> Path:
+    """Same from a YAML path, with an optional channel-order override."""
+    config = load_yaml(config_path)
+    if input_order:
+        config["dataset"]["input_order"] = input_order
+    return train_config(config, project_root)
+
+
+def val_loss_from_checkpoint(ckpt: Path) -> float:
+    """Read the val_loss back from the checkpoint filename (our naming contract)."""
+    m = re.search(r"val_loss=([0-9.]+)", ckpt.stem)
+    return float(m.group(1)) if m else float("nan")
+
+
 def main() -> None:
-    root = Path(__file__).resolve().parents[1]  # onera_boeing_landing/
     ap = argparse.ArgumentParser(description=__doc__)
-    ap.add_argument("--config", type=Path, default=root / "boeing_landing/configs/step1_cfc.yaml")
-    ap.add_argument("--project-root", type=Path, default=root)
+    ap.add_argument("--config", type=Path, default=DEFAULT_CONFIG)
+    ap.add_argument("--project-root", type=Path, default=PROJECT_ROOT)
     ap.add_argument("--input-order", default=None,
                     help="override the config channel order (see features.FEATURE_ORDERS)")
     a = ap.parse_args()
