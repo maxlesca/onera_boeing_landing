@@ -86,7 +86,8 @@ def _run_dir(project_root: Path, config: dict) -> Path:
     never overwritten across pipelines/iterations."""
     base = config.get("checkpoint_name") or "run"
     order = config["dataset"].get("input_order", "grouped")
-    stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    # microseconds: parallel jobs (e.g. a SLURM array) must never share a dir
+    stamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
     return ensure_dir(project_root / "runs" / f"{base}_{order}" / stamp)
 
 

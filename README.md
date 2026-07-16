@@ -32,17 +32,22 @@ runs/                     training outputs (gitignored)
 
 ## Install
 
-Python 3.12.
+Prerequisites: Python 3.12, GNU make, and **git-lfs** (the submodule stores its
+model weights with LFS — run `git lfs install` once *before* cloning, otherwise
+`Yolo_models_LARD_V2/` contains 132-byte pointers instead of models; recover
+with `git lfs pull` inside the submodule).
 
 ```bash
-# venv
-python -m venv .venv
-.venv/Scripts/python.exe -m pip install -r requirements.txt   # Windows
-.venv/bin/python        -m pip install -r requirements.txt    # Linux/macOS
+git clone --recurse-submodules <repo-url>
+cd onera_boeing_landing
 
-# or conda
+make install     # venv + dependencies
+# or conda:
 conda env create -f environment.yml && conda activate boeing_landing
 ```
+
+`make` auto-detects the interpreter (Linux venv, Windows venv — including from
+WSL — or the active conda env); no variable to pass.
 
 `torch` is the CPU build by default; swap for a CUDA build on a GPU machine.
 
@@ -78,6 +83,36 @@ make clean               # remove runs/, logs, caches
 ```
 
 Override the interpreter elsewhere: `make train PYTHON=python`.
+
+## Batch / cluster usage (HPC)
+
+Every make target wraps a plain `python -m` command, so jobs don't need make:
+
+| make | raw command |
+|---|---|
+| `make dataset CSV=...` | `python -m boeing_landing.data.build_dataset <csv> --config boeing_landing/configs/gps_cfc.yaml` |
+| `make train` | `python -m boeing_landing.train --config ... [--input-order X] [--max-epochs N]` |
+| `make evaluate RUN=...` | `python -m boeing_landing.evaluate --run <run_dir>` |
+| `make experiment-*` | `python -m boeing_landing.experiments.<name> --config ...` |
+
+SLURM example:
+
+```bash
+#!/bin/bash
+#SBATCH --job-name=gps_cfc
+#SBATCH --gres=gpu:1
+#SBATCH --cpus-per-task=8
+#SBATCH --time=02:00:00
+conda activate boeing_landing
+cd "$SLURM_SUBMIT_DIR"
+python -m boeing_landing.train --config boeing_landing/configs/gps_cfc.yaml
+```
+
+Notes for GPU nodes: install the CUDA torch build, then set `accelerator: gpu`,
+`precision: 16-mixed` and raise `dataloader.num_workers` in the config. Compute
+nodes are headless: use `make plots ... SAVE=1` / `--save` (never bare `--plot`).
+Runs land in `runs/<name>/<timestamp>/` — safe on a shared filesystem, no two
+jobs write to the same folder.
 
 ## Config
 

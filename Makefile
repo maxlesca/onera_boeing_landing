@@ -1,20 +1,26 @@
 # Boeing landing -- command shortcuts. Run from the repo root.
-# Override the interpreter on another machine:  make train PYTHON=python
-PYTHON  ?= .venv/Scripts/python.exe
+# The interpreter is auto-detected: Linux venv, then Windows venv (also works
+# from WSL via interop), then the active environment's `python` (e.g. conda).
+# Still overridable:  make train PYTHON=/path/to/python
+PYTHON  ?= $(if $(wildcard .venv/bin/python),.venv/bin/python,$(if $(wildcard .venv/Scripts/python.exe),.venv/Scripts/python.exe,python))
 CSV     ?= ../datasets/dataset_sans_barres/ldg_dataset_images_Maxime.csv
 CONFIG  ?= gps_cfc
 ORDER   ?= grouped
 CFGPATH  = boeing_landing/configs/$(CONFIG).yaml
 
 .DEFAULT_GOAL := help
-.PHONY: help install dataset train evaluate plots experiment-order experiment-convergence quadrotor-train clean
+.PHONY: help install deps dataset train evaluate plots experiment-order experiment-convergence quadrotor-train clean
 
 help:  ## show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | \
 		awk 'BEGIN{FS=":.*?## "}{printf "  %-22s %s\n", $$1, $$2}'
 
 install:  ## create .venv and install dependencies
-	python -m venv .venv && $(PYTHON) -m pip install -r requirements.txt
+	python -m venv .venv
+	$(MAKE) deps
+
+deps:  ## install dependencies into the detected interpreter
+	$(PYTHON) -m pip install -r requirements.txt
 
 dataset:  ## build the npz from the CSV (val runs / out dir come from the config)
 	$(PYTHON) -m boeing_landing.data.build_dataset $(CSV) --config $(CFGPATH)
