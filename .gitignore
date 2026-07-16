@@ -9,5 +9,7 @@ rapport_dataset*/
 *.zip
 *.npz
 .venv/
+lightning_logs/
+runs/
 DOC_*.md
 GUIDE_*.md
