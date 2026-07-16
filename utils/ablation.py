@@ -114,8 +114,11 @@ def drop_features_from_labels(input_labels: list[str],
     return filtered, removed_expanded
 
 
-def resolve_feature_indices(input_labels: list[str], features: list[str]) -> list[int]:
-    expanded = expand_feature_labels(input_labels)
+def resolve_feature_indices(input_labels: list[str], features: list[str], expand: bool = True) -> list[int]:
+    # `expand=False` for datasets whose labels are already one-channel-per-name
+    # (e.g. the landing pipeline, where "u" is a scalar body velocity, not the
+    # quadrotor's 4-motor command vector).
+    expanded = expand_feature_labels(input_labels) if expand else list(input_labels)
     normalized_lookup = {
         label.lower(): idx
         for idx, label in enumerate(expanded)
@@ -140,8 +143,9 @@ def resolve_feature_indices(input_labels: list[str], features: list[str]) -> lis
 def apply_feature_ablation(data: np.ndarray,
                            input_labels: list[str],
                            features: list[str],
-                           fill_value: float = 0.0) -> np.ndarray:
-    indices = resolve_feature_indices(input_labels, features)
+                           fill_value: float = 0.0,
+                           expand: bool = True) -> np.ndarray:
+    indices = resolve_feature_indices(input_labels, features, expand=expand)
     if not indices:
         return np.array(data, copy=True)
 
@@ -151,7 +155,7 @@ def apply_feature_ablation(data: np.ndarray,
     return ablated
 
 
-def iter_ablation_specs(ablation_cfg: dict | None, input_labels: list[str]):
+def iter_ablation_specs(ablation_cfg: dict | None, input_labels: list[str], expand: bool = True):
     if not ablation_cfg or not ablation_cfg.get("enabled", False):
         return []
 
@@ -160,7 +164,7 @@ def iter_ablation_specs(ablation_cfg: dict | None, input_labels: list[str]):
     feature_sets = ablation_cfg.get("feature_sets") or DEFAULT_FEATURE_GROUPS
     specs = []
     for name, features in feature_sets.items():
-        indices = resolve_feature_indices(input_labels, list(features))
+        indices = resolve_feature_indices(input_labels, list(features), expand=expand)
         if indices:
             specs.append((name, list(features)))
     return specs
