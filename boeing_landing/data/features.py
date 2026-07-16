@@ -18,9 +18,16 @@ ATTITUDE = ["pitch", "bank", "heading"]
 ANGULAR_RATES = ["p", "q", "r"]
 BODY_VELOCITY = ["u", "v", "w"]
 NED_VELOCITY = ["northsouth_velocity", "eastwest_velocity", "vertical_velocity"]
+# True simulator wind, standing in for the FMS wind estimate. The expert
+# compensates a per-run different wind that is invisible in the other inputs
+# (u,v,w are ground-relative) -- the aircraft analogue of the quadrotor
+# baseline's M_ext disturbance inputs.
+WIND = ["wind_velocity_x", "wind_velocity_y", "wind_velocity_z"]
 
 # Canonical order used when building the npz. Everything else is a permutation.
-CANONICAL_INPUTS = GPS + ATTITUDE + ANGULAR_RATES + BODY_VELOCITY + NED_VELOCITY
+# An optional per-frame dt channel (CfC timespans) is appended at load time by
+# the loader (dataset.use_dt in the config); it is not a CSV column.
+CANONICAL_INPUTS = GPS + ATTITUDE + ANGULAR_RATES + BODY_VELOCITY + NED_VELOCITY + WIND
 
 LABELS = ["longitudinal", "lateral", "directional", "stabilizer", "throttle_left"]
 
@@ -41,16 +48,16 @@ def random_order(seed: int) -> list[str]:
 
 # component-major ("all x, then all y, then all z"): the i-th channel of every
 # group side by side, for i = 0, 1, 2.
-_GROUPS = [GPS, ATTITUDE, ANGULAR_RATES, BODY_VELOCITY, NED_VELOCITY]
+_GROUPS = [GPS, ATTITUDE, ANGULAR_RATES, BODY_VELOCITY, NED_VELOCITY, WIND]
 BY_AXIS = [g[i] for i in range(3) for g in _GROUPS]
 
 # Named channel orders for the conv-ordering study. Each is a permutation of
 # CANONICAL_INPUTS (validated by check_order at load time).
 FEATURE_ORDERS = {
     "grouped": CANONICAL_INPUTS,                                               # by physical group
-    "gps_first": GPS + ATTITUDE + ANGULAR_RATES + BODY_VELOCITY + NED_VELOCITY,
-    "gps_last": ATTITUDE + ANGULAR_RATES + BODY_VELOCITY + NED_VELOCITY + GPS,
-    "pos_vel": GPS + BODY_VELOCITY + NED_VELOCITY + ATTITUDE + ANGULAR_RATES,   # positions, then velocities
+    "gps_first": GPS + ATTITUDE + ANGULAR_RATES + BODY_VELOCITY + NED_VELOCITY + WIND,
+    "gps_last": ATTITUDE + ANGULAR_RATES + BODY_VELOCITY + NED_VELOCITY + WIND + GPS,
+    "pos_vel": GPS + BODY_VELOCITY + NED_VELOCITY + WIND + ATTITUDE + ANGULAR_RATES,  # positions, then velocities
     "by_axis": BY_AXIS,                                                        # component-major
     "reversed": list(reversed(CANONICAL_INPUTS)),
     "random_1": random_order(1),

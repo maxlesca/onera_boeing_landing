@@ -16,7 +16,7 @@ import json
 from pathlib import Path
 
 from boeing_landing.data.features import (ANGULAR_RATES, ATTITUDE, BODY_VELOCITY,
-                                          GPS, LABELS, NED_VELOCITY)
+                                          GPS, LABELS, NED_VELOCITY, WIND)
 from boeing_landing.train import _load_split, _resolve_order
 from utils.config import load_yaml
 from utils.evaluation import (evaluate_arrays, metrics, plot_predictions,
@@ -29,6 +29,7 @@ ABLATION_GROUPS = {
     "angular_rate": ANGULAR_RATES,
     "body_velocity": BODY_VELOCITY,
     "ned_velocity": NED_VELOCITY,
+    "wind": WIND,
 }
 
 
@@ -45,7 +46,8 @@ def _val_arrays(config: dict):
     """Validation tensors with the exact preprocessing the run was trained with."""
     d = config["dataset"]
     seq_len = int(config["sequencing"]["seq_len"]) if config.get("sequencing", {}).get("value") else 0
-    return _load_split(d["val_npz"], _resolve_order(d), int(d["portion_len"]), int(d["stride"]), seq_len)
+    return _load_split(d["val_npz"], _resolve_order(d), int(d["portion_len"]), int(d["stride"]),
+                       seq_len, bool(d.get("use_dt", False)))
 
 
 def _print_metrics(name: str, m: dict) -> None:

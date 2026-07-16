@@ -1,8 +1,8 @@
 # Boeing 737 landing — behavioural cloning
 
 Train a neural-network flight controller for Boeing 737 landing by cloning an
-expert autopilot from simulation data. The controller maps inertial state and
-GPS to control commands through a 1D convolution and a closed-form
+expert autopilot from simulation data. The controller maps inertial state,
+GPS and wind to control commands through a 1D convolution and a closed-form
 continuous-time recurrent network (CfC). An image branch (CNN pretrained on
 LARD) is a planned extension.
 
@@ -56,8 +56,8 @@ make dataset CSV=path/to/dataset.csv
 ```
 
 This writes `landing_{train,val}.npz` into the config's `build.out_dir`
-(inputs = inertial + GPS, ILS excluded), split per run with normalisation
-bounds computed on the train split only.
+(18 inputs = inertial + GPS + wind, ILS excluded), split per run with
+normalisation bounds computed on the train split only.
 
 ## Usage
 
@@ -91,6 +91,7 @@ Data knobs:
 | `dataset.portion_len` | portion length in frames (125 = 5 s at 25 Hz) |
 | `dataset.stride` | step between portions (overlap) |
 | `dataset.input_order` | conv channel order: `grouped`, `gps_first`, `gps_last`, `pos_vel`, `by_axis`, `reversed`, `random_1..3` |
+| `dataset.use_dt` | append the per-frame time step as CfC timespans (baseline recipe) |
 | `sequencing.seq_len` | 1 — the conv sees one frame at a time, over the feature axis |
 
 Changing `portion_len` / `stride` / `input_order` needs no npz rebuild.

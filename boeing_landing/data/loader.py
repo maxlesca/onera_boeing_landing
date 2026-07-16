@@ -42,12 +42,27 @@ def _cut_portions(x, y, portion_len: int, stride: int):
     return xs, ys
 
 
+def _dt_channel(t_run: np.ndarray) -> np.ndarray:
+    """Per-frame time step of one run, from the real timestamps (so a skipped
+    frame or a variable rate is carried to the CfC). First frame copies the second."""
+    dt = np.diff(t_run, prepend=t_run[0])
+    if len(dt) > 1:
+        dt[0] = dt[1]
+    return dt
+
+
 def load_portions(npz_path: str | Path,
                   input_order: list[str] = CANONICAL_INPUTS,
                   portion_len: int = 125,
                   stride: int = 25,
-                  normalized: bool = True):
-    """Load one split as (input_array, output_array), each (n_portions, feat, portion_len)."""
+                  normalized: bool = True,
+                  use_dt: bool = False):
+    """Load one split as (input_array, output_array), each (n_portions, feat, portion_len).
+
+    use_dt appends the raw per-frame time step as a LAST channel (after any
+    reordering); Lightning_Model splits it off as the CfC timespans -- the
+    conv_cfc baseline recipe. Conservative default: opt-in via the config.
+    """
     npz = np.load(npz_path, allow_pickle=True)
     X, x_min, x_max = _reorder_inputs(npz, input_order)
     Y, y_min, y_max = npz["Y"], npz["y_min"], npz["y_max"]
@@ -59,7 +74,10 @@ def load_portions(npz_path: str | Path,
     for run in np.unique(npz["run"]):
         m = npz["run"] == run
         order = np.argsort(npz["t"][m])
-        cx, cy = _cut_portions(X[m][order].T, Y[m][order].T, portion_len, stride)
+        x_run = X[m][order].T
+        if use_dt:
+            x_run = np.vstack([x_run, _dt_channel(npz["t"][m][order])[None, :]])
+        cx, cy = _cut_portions(x_run, Y[m][order].T, portion_len, stride)
         xs += cx
         ys += cy
 

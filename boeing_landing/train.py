@@ -45,8 +45,9 @@ def _sequence(x, y, seq_len: int):
     return transform_to_sequence(x, seq_len), y[:, :, seq_len - 1:]
 
 
-def _load_split(npz_path: str, order: list[str], portion_len: int, stride: int, seq_len: int):
-    x, y = load_portions(npz_path, order, portion_len=portion_len, stride=stride)
+def _load_split(npz_path: str, order: list[str], portion_len: int, stride: int,
+                seq_len: int, use_dt: bool = False):
+    x, y = load_portions(npz_path, order, portion_len=portion_len, stride=stride, use_dt=use_dt)
     return _sequence(x, y, seq_len)
 
 
@@ -54,22 +55,29 @@ def _dataloaders(config: dict):
     d = config["dataset"]
     order = _resolve_order(d)
     seq_len = int(config["sequencing"]["seq_len"]) if config.get("sequencing", {}).get("value") else 0
-    xtr, ytr = _load_split(d["train_npz"], order, int(d["portion_len"]), int(d["stride"]), seq_len)
-    xva, yva = _load_split(d["val_npz"], order, int(d["portion_len"]), int(d["stride"]), seq_len)
+    use_dt = bool(d.get("use_dt", False))
+    xtr, ytr = _load_split(d["train_npz"], order, int(d["portion_len"]), int(d["stride"]), seq_len, use_dt)
+    xva, yva = _load_split(d["val_npz"], order, int(d["portion_len"]), int(d["stride"]), seq_len, use_dt)
 
     train_set, val_set = DatasetController(xtr, ytr), DatasetController(xva, yva)
     lc = config["dataloader"]
     kw = dict(batch_size=lc["batch_size"], num_workers=lc["num_workers"],
               pin_memory=lc["pin_memory"], drop_last=lc["drop_last"])
+    # the dt channel is split off as timespans before the model sees the data,
+    # so it does not count as a model input (same convention as the baseline)
+    input_dim = int(train_set.input.shape[-1]) - (1 if use_dt else 0)
     return (torch.utils.data.DataLoader(train_set, shuffle=True, **kw),
             torch.utils.data.DataLoader(val_set, shuffle=False, **kw),
-            int(train_set.input.shape[-1]), int(train_set.output.shape[-1]))
+            input_dim, int(train_set.output.shape[-1]))
 
 
 def _inject_labels(config: dict) -> None:
-    """Lightning_Model reads input_labels/output_labels; keep them consistent
-    with the chosen channel order (no 't'/'dt' -> with_time stays False)."""
-    config["dataset"]["input_labels"] = _resolve_order(config["dataset"])
+    """Lightning_Model reads input_labels/output_labels; 'dt' at the end turns
+    on its with_time path (the dt channel becomes the CfC timespans)."""
+    labels = list(_resolve_order(config["dataset"]))
+    if config["dataset"].get("use_dt", False):
+        labels.append("dt")
+    config["dataset"]["input_labels"] = labels
     config["dataset"]["output_labels"] = LABELS
 
 

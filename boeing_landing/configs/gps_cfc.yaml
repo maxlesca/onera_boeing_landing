@@ -35,6 +35,7 @@ dataset:
   portion_len: 125       # ~5 s at 25 Hz -- the analogue of the quadrotor 200-step trajectory
   stride: 25             # step between portions (~1 s) -> overlap for augmentation
   input_order: grouped   # channel order for the conv (see features.FEATURE_ORDERS)
+  use_dt: true           # per-frame dt -> CfC timespans (conv_cfc baseline recipe)
   normalized: true
   with_noise: false
   with_bias: false
