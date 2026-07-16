@@ -178,11 +178,13 @@ def train_config(config: dict, project_root: Path) -> Path:
 
 
 def train(config_path: Path, project_root: Path = PROJECT_ROOT,
-          input_order: str | None = None) -> Path:
-    """Same from a YAML path, with an optional channel-order override."""
+          input_order: str | None = None, max_epochs: int | None = None) -> Path:
+    """Same from a YAML path, with optional launch-time overrides."""
     config = load_yaml(config_path)
     if input_order:
         config["dataset"]["input_order"] = input_order
+    if max_epochs:
+        config["training"]["max_epochs"] = max_epochs
     return train_config(config, project_root)
 
 
@@ -198,8 +200,10 @@ def main() -> None:
     ap.add_argument("--project-root", type=Path, default=PROJECT_ROOT)
     ap.add_argument("--input-order", default=None,
                     help="override the config channel order (see features.FEATURE_ORDERS)")
+    ap.add_argument("--max-epochs", type=int, default=None,
+                    help="override the config epoch count (quick trials)")
     a = ap.parse_args()
-    train(a.config, a.project_root, a.input_order)
+    train(a.config, a.project_root, a.input_order, a.max_epochs)
 
 
 if __name__ == "__main__":

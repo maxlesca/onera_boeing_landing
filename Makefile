@@ -19,8 +19,8 @@ install:  ## create .venv and install dependencies
 dataset:  ## build the npz from the CSV (val runs / out dir come from the config)
 	$(PYTHON) -m boeing_landing.data.build_dataset $(CSV) --config $(CFGPATH)
 
-train:  ## train a pipeline: make train CONFIG=gps_cfc ORDER=grouped
-	$(PYTHON) -m boeing_landing.train --config $(CFGPATH) --input-order $(ORDER)
+train:  ## train a pipeline: make train CONFIG=gps_cfc ORDER=grouped (EPOCHS=3 for a quick trial)
+	$(PYTHON) -m boeing_landing.train --config $(CFGPATH) --input-order $(ORDER) $(if $(EPOCHS),--max-epochs $(EPOCHS))
 
 evaluate:  ## metrics + ablations of a run: make evaluate RUN=runs/<name>/<timestamp>
 	$(PYTHON) -m boeing_landing.evaluate --run $(RUN)
