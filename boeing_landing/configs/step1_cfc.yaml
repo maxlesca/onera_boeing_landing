@@ -1,0 +1,68 @@
+# Step-1 landing controller: inertial + GPS -> Conv1D -> CfC -> commands.
+# Model hyperparameters are a faithful copy of Tudor's conv_cfc_default_n64.
+# Only the dataset section (our data) and num_workers (Windows) differ.
+# Paths are relative to the repo root (run from onera_boeing_landing/).
+
+training:
+  max_epochs: 20
+  lr: 0.001
+  seed: 42
+  logger: false
+  accelerator: auto          # auto | cpu | gpu
+  devices: 1
+  precision: 32              # 32 | 16-mixed (GPU only)
+  gradient_clip_val: 0.0     # >0 clips gradients (RNN stability); 0 = off
+  early_stopping_patience: 0 # >0 stops after N epochs without val improvement; 0 = off
+
+dataset:
+  train_npz: ../datasets/step1_gps/landing_train.npz
+  val_npz: ../datasets/step1_gps/landing_val.npz
+  portion_len: 125       # ~5 s at 25 Hz (a landing evolves slower than a hover)
+  stride: 25             # step between portions (~1 s) -> overlap for augmentation
+  input_order: grouped   # channel order for the conv (see features.FEATURE_ORDERS)
+  normalized: true
+  with_noise: false
+  with_bias: false
+  with_delay: false
+  delay_steps: 2
+
+mlp_block:
+  value: false
+  no_layers: [64, 128, 128, 256]
+conv_block:
+  value: true
+  output_dim: 256
+
+# seq_len=1 like Tudor: the conv sees one frame at a time (over the feature axis),
+# the CfC carries memory across the portion.
+sequencing:
+  value: true
+  seq_len: 1
+
+dataloader:
+  batch_size: 32
+  num_workers: 0         # Windows: 0 avoids worker spawn issues (Tudor used 8)
+  pin_memory: false
+  drop_last: true
+
+model:
+  type: cfc
+  no_neurons_layer: 64
+  ode_unfolds: 6         # LTC only (inert for cfc)
+  cfc_mode: default
+  ncp:                   # NCP only (inert for cfc)
+    inter_neurons: 32
+    command_neurons: 24
+    sensory_fanout: 20
+    inter_fanout: 16
+    recurrent_command_synapses: 16
+    motor_fanin: 20
+  backbone_units: 128
+  backbone_layers: 1
+  backbone_dropout: 0.0
+  activation: lecun_tanh
+  mixed_memory: false
+  scale_factor: 1.0
+  hidden_layers: [120, 120, 120]  # MLP only (inert for cfc)
+
+checkpoint_name: step1_landing_cfc
