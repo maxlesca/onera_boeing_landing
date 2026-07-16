@@ -26,6 +26,7 @@ utils/                    shared library (imported across the repo)
 quadrotor_baseline/       reference quadrotor controller and pretrained models
 dataset_preparation/      dataset tools (image crop, rosbag extract)
 Yolo_models_LARD_V2/      submodule (YOLO models)
+datasets/                 built npz files (gitignored, created by make dataset)
 runs/                     training outputs (gitignored)
 ```
 

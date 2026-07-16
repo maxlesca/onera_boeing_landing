@@ -18,7 +18,7 @@ training:
 # npz build step (make dataset). The source CSV stays a CLI arg (machine-specific).
 build:
   val_runs: [8]              # runs held out for validation
-  out_dir: ../datasets/gps_no_ils
+  out_dir: datasets/gps_no_ils   # inside the repo, gitignored (same layout as the baseline)
 
 # run evaluation (make evaluate)
 evaluation:
@@ -30,8 +30,8 @@ experiments:
   seeds: [42, 43, 44]        # convergence study: same config, several inits
 
 dataset:
-  train_npz: ../datasets/gps_no_ils/landing_train.npz
-  val_npz: ../datasets/gps_no_ils/landing_val.npz
+  train_npz: datasets/gps_no_ils/landing_train.npz
+  val_npz: datasets/gps_no_ils/landing_val.npz
   portion_len: 125       # ~5 s at 25 Hz -- the analogue of the quadrotor 200-step trajectory
   stride: 25             # step between portions (~1 s) -> overlap for augmentation
   input_order: grouped   # channel order for the conv (see features.FEATURE_ORDERS)

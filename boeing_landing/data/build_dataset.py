@@ -115,7 +115,7 @@ def main() -> None:
 
     build_cfg = load_yaml(a.config).get("build", {})
     val_runs = {int(r) for r in build_cfg.get("val_runs", [8])}
-    build(a.source, val_runs, Path(build_cfg.get("out_dir", "../datasets/gps_no_ils")))
+    build(a.source, val_runs, Path(build_cfg.get("out_dir", "datasets/gps_no_ils")))
 
 
 if __name__ == "__main__":
