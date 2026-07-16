@@ -19,6 +19,8 @@ boeing_landing/           project code
   configs/step1_cfc.yaml    one pipeline = one config
   experiments/feature_order.py   sweep conv channel orders
   train.py                  assemble + fit_and_save (generic, config-driven)
+  evaluate.py               evaluate a run + feature-group ablations
+  report.py                 training curves for one run, or several compared
 utils/                    shared library (imported across the repo)
 quadrotor_baseline/       reference quadrotor controller and pretrained models
 dataset_preparation/      dataset tools (image crop, rosbag extract)
@@ -64,6 +66,9 @@ make dataset CSV=...     # build the npz
 make train               # train the step-1 CfC
 make train ORDER=gps_last            # pick a conv channel order
 make train CONFIG=step1_cfc          # pick a pipeline config
+make evaluate RUN=runs/<n>/<ts>      # metrics + feature-group ablations
+make plots RUNS="runs/<n>/<ts>"      # training curves (several RUNS = comparison)
+make plots RUNS="..." SAVE=1         # save PNG instead of showing
 make experiment-order    # sweep channel orders, rank by val_loss
 make quadrotor-train     # train the quadrotor baseline
 make clean               # remove runs/, logs, caches

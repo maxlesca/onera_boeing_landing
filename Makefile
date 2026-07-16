@@ -6,7 +6,7 @@ CONFIG ?= step1_cfc
 ORDER  ?= grouped
 
 .DEFAULT_GOAL := help
-.PHONY: help install dataset train experiment-order quadrotor-train clean
+.PHONY: help install dataset train evaluate plots experiment-order quadrotor-train clean
 
 help:  ## show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | \
@@ -20,6 +20,12 @@ dataset:  ## build the step-1 npz from the CSV (GPS in, ILS out)
 
 train:  ## train a pipeline: make train CONFIG=step1_cfc ORDER=grouped
 	$(PYTHON) -m boeing_landing.train --config boeing_landing/configs/$(CONFIG).yaml --input-order $(ORDER)
+
+evaluate:  ## evaluate a run + feature ablations: make evaluate RUN=runs/<name>/<timestamp>
+	$(PYTHON) -m boeing_landing.evaluate --run $(RUN) --ablation
+
+plots:  ## training curves: make plots RUNS="runs/<n>/<ts>" (several = comparison; SAVE=1 -> PNG)
+	$(PYTHON) -m boeing_landing.report --runs $(RUNS) $(if $(SAVE),--save)
 
 experiment-order:  ## sweep the conv channel orders and compare val loss
 	$(PYTHON) -m boeing_landing.experiments.feature_order
