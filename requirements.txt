@@ -1,0 +1,20 @@
+# Dépendances du pipeline atterrissage Boeing (boeing_landing/).
+# Versions épinglées = reproductibilité entre machines (venv OU conda).
+#
+# torch est ici en build CPU (2.13.0). Sur une machine à GPU, remplacer par le
+# build CUDA correspondant (voir https://pytorch.org). Le build CPU tourne
+# partout sans driver à faire matcher — c'est le défaut portable.
+#
+# Installation :
+#   venv  :  python -m venv .venv && .venv/Scripts/pip install -r requirements.txt
+#   conda :  conda env create -f environment.yml   (il lit ce fichier)
+
+torch==2.13.0
+lightning==2.6.5
+ncps==1.0.1
+snntorch==1.0.0
+pandas==3.0.3
+numpy==2.5.1
+scikit-learn==1.9.0
+matplotlib==3.11.0
+PyYAML==6.0.3

@@ -1,0 +1,16 @@
+# Environnement conda/Anaconda pour le pipeline atterrissage Boeing.
+# Une seule commande sur une machine Anaconda :
+#     conda env create -f environment.yml
+#     conda activate boeing_landing
+#
+# Ce fichier NE duplique PAS la liste des paquets : il délègue à
+# requirements.txt (source unique de vérité), pour que venv et conda installent
+# exactement la même chose.
+name: boeing_landing
+channels:
+  - conda-forge
+dependencies:
+  - python=3.12
+  - pip
+  - pip:
+      - -r requirements.txt
