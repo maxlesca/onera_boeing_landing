@@ -31,8 +31,8 @@ train:  ## train a pipeline: make train CONFIG=gps_cfc ORDER=grouped (EPOCHS=3 f
 evaluate:  ## metrics + ablations of a run: make evaluate RUN=runs/<name>/<timestamp>
 	$(PYTHON) -m boeing_landing.evaluate --run $(RUN)
 
-plots:  ## curves + ablation bars: make plots RUNS="runs/<n>/<ts>" (several = comparison; SAVE=1 -> PNG; NOISE=0.005)
-	$(PYTHON) -m boeing_landing.report --runs $(RUNS) $(if $(SAVE),--save) $(if $(NOISE),--noise $(NOISE))
+plots:  ## curves/ablation/sweeps: make plots RUNS="..." (SAVE=1 -> PNG; BARS=1 -> best-val_loss bars; NOISE=0.005)
+	$(PYTHON) -m boeing_landing.report --runs $(RUNS) $(if $(SAVE),--save) $(if $(BARS),--bars) $(if $(NOISE),--noise $(NOISE))
 
 experiment-order:  ## sweep the conv channel orders and compare val loss
 	$(PYTHON) -m boeing_landing.experiments.feature_order --config $(CFGPATH)

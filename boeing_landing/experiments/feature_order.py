@@ -16,18 +16,21 @@ from boeing_landing.data.features import FEATURE_ORDERS
 from boeing_landing.train import DEFAULT_CONFIG, PROJECT_ROOT, train, val_loss_from_checkpoint
 
 
-def sweep(config_path: Path, project_root: Path) -> dict[str, float]:
+def sweep(config_path: Path, project_root: Path) -> dict[str, tuple[float, Path]]:
     scores = {}
     for order in FEATURE_ORDERS:
         print(f"\n=== order: {order} ===")
-        scores[order] = val_loss_from_checkpoint(train(config_path, project_root, input_order=order))
+        ckpt = train(config_path, project_root, input_order=order)
+        scores[order] = (val_loss_from_checkpoint(ckpt), ckpt.parent)
     return scores
 
 
-def report(scores: dict[str, float]) -> None:
+def report(scores: dict[str, tuple[float, Path]]) -> None:
     print("\n=== conv channel order vs val_loss (best first) ===")
-    for order, loss in sorted(scores.items(), key=lambda kv: kv[1]):
+    for order, (loss, _) in sorted(scores.items(), key=lambda kv: kv[1][0]):
         print(f"  {order:12s} {loss:.6f}")
+    dirs = " ".join(str(run_dir) for _, run_dir in scores.values())
+    print(f'\nvisualize:  make plots RUNS="{dirs}" BARS=1')
 
 
 def main() -> None:

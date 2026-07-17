@@ -76,6 +76,26 @@ def plot_ablation(run_dir: Path, ax, noise: float = 0.0) -> None:
     ax.grid(True, axis="x", alpha=0.3)
 
 
+def _best_val_loss(run_dir: Path) -> float:
+    """best_val_loss recorded in the run's summary.json."""
+    return json.loads((run_dir / "summary.json").read_text())["best_val_loss"]
+
+
+def plot_best_bars(run_dirs: list[Path], ax, noise: float = 0.0) -> None:
+    """Sweep comparison: best val_loss of each run as sorted bars.
+    Bars left of the `best + noise` line are indistinguishable from the best."""
+    scores = {d.parent.name: _best_val_loss(d) for d in run_dirs}
+    names = sorted(scores, key=scores.get, reverse=True)
+    ax.barh(names, [scores[n] for n in names])
+    if noise > 0:
+        ax.axvline(min(scores.values()) + noise, ls="--", color="grey",
+                   label=f"best + seed noise {noise:g}")
+        ax.legend()
+    ax.set_xlabel("best val_loss")
+    ax.set_title("sweep comparison")
+    ax.grid(True, axis="x", alpha=0.3)
+
+
 def _style_loss_ax(ax) -> None:
     ax.set(xlabel="step", ylabel="MSE loss", yscale="log")
     ax.grid(True, which="both", alpha=0.3)
@@ -87,7 +107,9 @@ def main() -> None:
     ap.add_argument("--runs", type=Path, nargs="+", required=True, help="one or more run directories")
     ap.add_argument("--save", action="store_true", help="save PNG next to the first run instead of showing")
     ap.add_argument("--noise", type=float, default=0.005,
-                    help="seed-noise threshold line on the ablation bars (0 = none)")
+                    help="seed-noise threshold line on the bar charts (0 = none)")
+    ap.add_argument("--bars", action="store_true",
+                    help="several runs: compare their BEST val_loss as bars (sweeps) instead of curves")
     a = ap.parse_args()
 
     single = len(a.runs) == 1
@@ -100,6 +122,8 @@ def main() -> None:
         _style_loss_ax(axes[0] if with_ablation else axes)
         if with_ablation:
             plot_ablation(a.runs[0], axes[1], noise=a.noise)
+    elif a.bars:
+        plot_best_bars(a.runs, axes, noise=a.noise)
     else:
         plot_comparison(a.runs, axes)
         _style_loss_ax(axes)

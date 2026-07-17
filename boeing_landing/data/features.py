@@ -54,8 +54,7 @@ BY_AXIS = [g[i] for i in range(3) for g in _GROUPS]
 # Named channel orders for the conv-ordering study. Each is a permutation of
 # CANONICAL_INPUTS (validated by check_order at load time).
 FEATURE_ORDERS = {
-    "grouped": CANONICAL_INPUTS,                                               # by physical group
-    "gps_first": GPS + ATTITUDE + ANGULAR_RATES + BODY_VELOCITY + NED_VELOCITY + WIND,
+    "grouped": CANONICAL_INPUTS,                                               # by physical group (GPS first)
     "gps_last": ATTITUDE + ANGULAR_RATES + BODY_VELOCITY + NED_VELOCITY + WIND + GPS,
     "pos_vel": GPS + BODY_VELOCITY + NED_VELOCITY + WIND + ATTITUDE + ANGULAR_RATES,  # positions, then velocities
     "by_axis": BY_AXIS,                                                        # component-major
