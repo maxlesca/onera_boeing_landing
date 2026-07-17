@@ -16,6 +16,7 @@ import json
 from pathlib import Path
 
 import matplotlib.pyplot as plt
+import numpy as np
 import pandas as pd
 
 
@@ -32,6 +33,41 @@ def _run_label(run_dir: Path) -> str:
     return f"{run_dir.parent.name}/{run_dir.name}"
 
 
+def _mean_predictor_mse(run_dir: Path) -> tuple[list[str], np.ndarray] | None:
+    """Per-command MSE of the naive baseline that always outputs the train-mean
+    command, computed from the run's own dataset (paths in its saved config).
+    Roughly the val-label variance. None if the npz files are missing."""
+    from boeing_landing.train import PROJECT_ROOT
+    from utils.config import load_yaml
+
+    cfg = load_yaml(run_dir / "config.yaml").get("dataset", {})
+    paths = [PROJECT_ROOT / str(cfg.get(k, "")) for k in ("train_npz", "val_npz")]
+    if not all(p.is_file() for p in paths):
+        return None
+    train, val = (np.load(p, allow_pickle=True) for p in paths)
+    lo, hi = train["y_min"], train["y_max"]  # bounds come from the train split
+    normalize = lambda y: (y - lo) / (hi - lo + 1e-10)
+    mse = ((normalize(val["Y"]) - normalize(train["Y"]).mean(axis=0)) ** 2).mean(axis=0)
+    return list(train["label_names"]), mse
+
+
+def _mean_predictor_loss(run_dir: Path) -> float | None:
+    """The same baseline as a single val_loss number (mean over the commands).
+    A model is only learning when it sits clearly below this."""
+    per_command = _mean_predictor_mse(run_dir)
+    return float(per_command[1].mean()) if per_command else None
+
+
+def _draw_mean_baseline(run_dir: Path, ax, axis: str = "y") -> bool:
+    """Dotted line at the predict-the-mean val_loss; False if it can't be computed."""
+    base = _mean_predictor_loss(run_dir)
+    if base is None:
+        return False
+    line = ax.axhline if axis == "y" else ax.axvline
+    line(base, ls=":", color="tab:red", label=f"predict-the-mean {base:.4f}")
+    return True
+
+
 def plot_run(run_dir: Path, ax) -> None:
     """Train and val loss curves of a single run."""
     df = _metrics_frame(run_dir)
@@ -39,6 +75,7 @@ def plot_run(run_dir: Path, ax) -> None:
         if col in df:
             points = df.dropna(subset=[col])
             ax.plot(points["step"], points[col], style, label=col)
+    _draw_mean_baseline(run_dir, ax)
     ax.set_title(_run_label(run_dir))
 
 
@@ -48,7 +85,33 @@ def plot_comparison(run_dirs: list[Path], ax) -> None:
         df = _metrics_frame(run_dir)
         points = df.dropna(subset=["val_loss"])
         ax.plot(points["step"], points["val_loss"], "o-", label=_run_label(run_dir))
+    _draw_mean_baseline(run_dirs[0], ax)
     ax.set_title("val_loss comparison")
+
+
+def _model_per_command_mse(run_dir: Path) -> dict[str, float] | None:
+    """{command: model mse} from the run's evaluation.json; None if not evaluated."""
+    path = run_dir / "evaluation.json"
+    if not path.exists():
+        return None
+    per = json.loads(path.read_text()).get("regression", {}).get("per_channel")
+    return {name: m["mse"] for name, m in per.items()} if per else None
+
+
+def plot_per_command(run_dir: Path, ax) -> None:
+    """Per-command MSE of the model next to the predict-the-mean baseline
+    (~ val-label variance): a command is only learned when its model bar sits
+    below the baseline bar. The global val_loss hides these differences."""
+    labels, base = _mean_predictor_mse(run_dir)
+    model = _model_per_command_mse(run_dir)
+    pos = np.arange(len(labels))
+    ax.bar(pos - 0.2, [model[l] for l in labels], 0.4, label="model")
+    ax.bar(pos + 0.2, base, 0.4, label="predict-the-mean (~variance)", color="tab:red", alpha=0.6)
+    ax.set_xticks(pos, labels, rotation=20, ha="right")
+    ax.set_ylabel("MSE on val")
+    ax.set_title("per-command MSE")
+    ax.grid(True, axis="y", alpha=0.3)
+    ax.legend()
 
 
 def _ablation_deltas(run_dir: Path) -> tuple[float, dict[str, float]] | None:
@@ -109,6 +172,7 @@ def plot_best_bars(run_dirs: list[Path], ax, noise: float = 0.0) -> None:
     if noise > 0:
         ax.axvline(min(scores.values()) + noise, ls="--", color="grey",
                    label=f"best + seed noise {noise:g}")
+    if _draw_mean_baseline(run_dirs[0], ax, axis="x") or noise > 0:
         ax.legend()
     ax.set_xlabel("best val_loss")
     ax.set_title("sweep comparison")
@@ -119,6 +183,24 @@ def _style_loss_ax(ax) -> None:
     ax.set(xlabel="step", ylabel="MSE loss", yscale="log")
     ax.grid(True, which="both", alpha=0.3)
     ax.legend()
+
+
+def _report_single(run_dir: Path, noise: float):
+    """One run's figure: loss curves, plus the per-command MSE and ablation
+    panels when their data exists (make evaluate writes evaluation.json)."""
+    with_commands = (_model_per_command_mse(run_dir) is not None
+                     and _mean_predictor_mse(run_dir) is not None)
+    with_ablation = _ablation_deltas(run_dir) is not None
+    n = 1 + with_commands + with_ablation
+    fig, axes = plt.subplots(1, n, figsize=(5.5 * n, 5))
+    axes = np.atleast_1d(axes)
+    plot_run(run_dir, axes[0])
+    _style_loss_ax(axes[0])
+    if with_commands:
+        plot_per_command(run_dir, axes[1])
+    if with_ablation:
+        plot_ablation(run_dir, axes[-1], noise=noise)
+    return fig
 
 
 def main() -> None:
@@ -143,21 +225,15 @@ def main() -> None:
     if not a.runs:
         ap.error("--runs or --orders is required")
 
-    single = len(a.runs) == 1
-    with_ablation = single and _ablation_deltas(a.runs[0]) is not None
-    fig, axes = plt.subplots(1, 2 if with_ablation else 1,
-                             figsize=(14, 5) if with_ablation else (9, 5))
-
-    if single:
-        plot_run(a.runs[0], axes[0] if with_ablation else axes)
-        _style_loss_ax(axes[0] if with_ablation else axes)
-        if with_ablation:
-            plot_ablation(a.runs[0], axes[1], noise=a.noise)
-    elif a.bars:
-        plot_best_bars(a.runs, axes, noise=a.noise)
+    if len(a.runs) == 1:
+        fig = _report_single(a.runs[0], a.noise)
     else:
-        plot_comparison(a.runs, axes)
-        _style_loss_ax(axes)
+        fig, ax = plt.subplots(figsize=(9, 5))
+        if a.bars:
+            plot_best_bars(a.runs, ax, noise=a.noise)
+        else:
+            plot_comparison(a.runs, ax)
+            _style_loss_ax(ax)
     fig.tight_layout()
 
     if a.save:
