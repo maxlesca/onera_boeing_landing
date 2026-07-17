@@ -6,7 +6,9 @@ PYTHON  ?= $(if $(wildcard .venv/bin/python),.venv/bin/python,$(if $(wildcard .v
 CSV     ?= ../datasets/dataset_sans_barres/ldg_dataset_images_Maxime.csv
 CONFIG  ?= gps_cfc
 ORDER   ?= grouped
-CFGPATH  = boeing_landing/configs/$(CONFIG).yaml
+# CONFIG accepts the pipeline name (gps_cfc, with or without .yaml) or a full
+# path to a yaml (anything containing a /), used verbatim.
+CFGPATH  = $(if $(findstring /,$(CONFIG)),$(CONFIG),boeing_landing/configs/$(basename $(CONFIG)).yaml)
 
 .DEFAULT_GOAL := help
 .PHONY: help install deps dataset train evaluate plots experiment-order experiment-convergence quadrotor-train clean
