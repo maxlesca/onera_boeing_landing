@@ -29,8 +29,7 @@ def report(scores: dict[str, tuple[float, Path]]) -> None:
     print("\n=== conv channel order vs val_loss (best first) ===")
     for order, (loss, _) in sorted(scores.items(), key=lambda kv: kv[1][0]):
         print(f"  {order:12s} {loss:.6f}")
-    dirs = " ".join(str(run_dir) for _, run_dir in scores.values())
-    print(f'\nvisualize:  make plots RUNS="{dirs}" BARS=1')
+    print("\nvisualize:  make plots-orders")
 
 
 def main() -> None:

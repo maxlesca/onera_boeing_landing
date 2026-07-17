@@ -76,6 +76,23 @@ def plot_ablation(run_dir: Path, ax, noise: float = 0.0) -> None:
     ax.grid(True, axis="x", alpha=0.3)
 
 
+def _order_run_dirs() -> list[Path]:
+    """Latest run dir of each conv-order sweep entry (for --orders)."""
+    from boeing_landing.data.features import FEATURE_ORDERS
+    from boeing_landing.train import DEFAULT_CONFIG, PROJECT_ROOT
+    from utils.config import load_yaml
+
+    base = load_yaml(DEFAULT_CONFIG).get("checkpoint_name") or "run"
+    found = []
+    for order in FEATURE_ORDERS:
+        stamps = sorted((PROJECT_ROOT / "runs" / f"{base}_{order}").glob("*"))
+        if stamps:
+            found.append(stamps[-1])
+    if not found:
+        raise SystemExit("no order-sweep runs found (run `make experiment-order` first)")
+    return found
+
+
 def _best_val_loss(run_dir: Path) -> float:
     """best_val_loss recorded in the run's summary.json."""
     return json.loads((run_dir / "summary.json").read_text())["best_val_loss"]
@@ -104,13 +121,20 @@ def _style_loss_ax(ax) -> None:
 
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__)
-    ap.add_argument("--runs", type=Path, nargs="+", required=True, help="one or more run directories")
+    ap.add_argument("--runs", type=Path, nargs="+", help="one or more run directories")
+    ap.add_argument("--orders", action="store_true",
+                    help="auto-discover the conv-order sweep runs (implies --bars)")
     ap.add_argument("--save", action="store_true", help="save PNG next to the first run instead of showing")
     ap.add_argument("--noise", type=float, default=0.005,
                     help="seed-noise threshold line on the bar charts (0 = none)")
     ap.add_argument("--bars", action="store_true",
                     help="several runs: compare their BEST val_loss as bars (sweeps) instead of curves")
     a = ap.parse_args()
+
+    if a.orders:
+        a.runs, a.bars = _order_run_dirs(), True
+    if not a.runs:
+        ap.error("--runs or --orders is required")
 
     single = len(a.runs) == 1
     with_ablation = single and _ablation_deltas(a.runs[0]) is not None
