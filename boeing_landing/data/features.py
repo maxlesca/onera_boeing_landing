@@ -29,7 +29,11 @@ WIND = ["wind_velocity_x", "wind_velocity_y", "wind_velocity_z"]
 # the loader (dataset.use_dt in the config); it is not a CSV column.
 CANONICAL_INPUTS = GPS + ATTITUDE + ANGULAR_RATES + BODY_VELOCITY + NED_VELOCITY + WIND
 
-LABELS = ["longitudinal", "lateral", "directional", "stabilizer", "throttle_left"]
+# throttle_right mirrors throttle_left exactly in the source data (checked:
+# max |left-right| = 0.0); kept as a label anyway so the controller outputs
+# the full command set -- it doubles the throttle weight in the MSE.
+LABELS = ["longitudinal", "lateral", "directional", "stabilizer",
+          "throttle_left", "throttle_right"]
 
 def extend_order(order: list[str], available: list[str]) -> list[str]:
     """`order` completed with the channels the dataset holds beyond it (e.g.

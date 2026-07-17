@@ -33,6 +33,7 @@ ABLATION_GROUPS = {
     "ned_velocity": NED_VELOCITY,
     "wind": WIND,
     "corners": CORNERS,
+    "touchdown": ["touchdown_flag"],
 }
 
 
@@ -64,11 +65,17 @@ def _print_metrics(name: str, m: dict) -> None:
           f"runtime={m['runtime_mean']:.6f}s ± {m['runtime_std']:.6f}s")
 
 
+def _labels(config: dict) -> list[str]:
+    """The run's own command labels (a run trained before a LABELS change must
+    be evaluated with the labels it was trained on)."""
+    return list(config["dataset"].get("output_labels") or LABELS)
+
+
 def _baseline_results(config: dict, checkpoint: Path, inputs, outputs):
     """Evaluate the run as-is: loss metrics + per-command regression metrics."""
     yhat, target, runtime = evaluate_arrays(config, config["dataloader"], checkpoint, inputs, outputs)
     results = {"baseline": metrics(yhat, target, runtime),
-               "regression": regression_metrics(yhat, target, LABELS)}
+               "regression": regression_metrics(yhat, target, _labels(config))}
     return results, yhat, target
 
 
@@ -114,7 +121,7 @@ def evaluate_run(run_dir: Path, with_ablation: bool | None = None, plot: bool = 
     _print_results(results)
     _save_results(run_dir, results)
     if plot:
-        plot_predictions(yhat, target, labels=LABELS)
+        plot_predictions(yhat, target, labels=_labels(config))
     return results
 
 

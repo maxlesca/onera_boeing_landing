@@ -21,8 +21,10 @@ build:
   val_runs: [8]              # runs held out for validation
   out_dir: datasets/gps_corners  # inside the repo, gitignored (same layout as the baseline)
   runway_corners: true       # append the 4 runway corners (ECEF) as 12 input channels
-  extra_columns: []          # extra CSV columns appended as inputs (e.g. touchdown_flag
-                             # -- currently dead: True on a single frame of run 7)
+  extra_columns: [touchdown_flag]  # extra CSV columns appended as inputs. Note:
+                             # touchdown_flag is True on a single frame (run 7) --
+                             # the recordings stop at touchdown, so the channel is
+                             # near-constant until a dataset includes the rollout.
 
 # run evaluation (make evaluate)
 evaluation:
