@@ -76,20 +76,22 @@ def plot_ablation(run_dir: Path, ax, noise: float = 0.0) -> None:
     ax.grid(True, axis="x", alpha=0.3)
 
 
-def _order_run_dirs() -> list[Path]:
-    """Latest run dir of each conv-order sweep entry (for --orders)."""
+def _order_run_dirs(config_path: Path, stamp: str | None = None) -> list[Path]:
+    """One run dir per conv-order sweep entry of the given pipeline config:
+    the latest, or the latest whose timestamp starts with `stamp`."""
     from boeing_landing.data.features import FEATURE_ORDERS
-    from boeing_landing.train import DEFAULT_CONFIG, PROJECT_ROOT
+    from boeing_landing.train import PROJECT_ROOT
     from utils.config import load_yaml
 
-    base = load_yaml(DEFAULT_CONFIG).get("checkpoint_name") or "run"
+    base = load_yaml(config_path).get("checkpoint_name") or "run"
     found = []
     for order in FEATURE_ORDERS:
-        stamps = sorted((PROJECT_ROOT / "runs" / f"{base}_{order}").glob("*"))
+        stamps = sorted((PROJECT_ROOT / "runs" / f"{base}_{order}").glob(f"{stamp or ''}*"))
         if stamps:
             found.append(stamps[-1])
     if not found:
-        raise SystemExit("no order-sweep runs found (run `make experiment-order` first)")
+        raise SystemExit(f"no order-sweep runs for '{base}' (run `make experiment-order` "
+                         "first, or loosen STAMP/CONFIG)")
     return found
 
 
@@ -124,6 +126,10 @@ def main() -> None:
     ap.add_argument("--runs", type=Path, nargs="+", help="one or more run directories")
     ap.add_argument("--orders", action="store_true",
                     help="auto-discover the conv-order sweep runs (implies --bars)")
+    ap.add_argument("--config", type=Path, default=None,
+                    help="with --orders: pipeline config whose sweep to show (default: gps_cfc)")
+    ap.add_argument("--stamp", default=None,
+                    help="with --orders: timestamp prefix selecting a sweep session")
     ap.add_argument("--save", action="store_true", help="save PNG next to the first run instead of showing")
     ap.add_argument("--noise", type=float, default=0.005,
                     help="seed-noise threshold line on the bar charts (0 = none)")
@@ -132,7 +138,8 @@ def main() -> None:
     a = ap.parse_args()
 
     if a.orders:
-        a.runs, a.bars = _order_run_dirs(), True
+        from boeing_landing.train import DEFAULT_CONFIG
+        a.runs, a.bars = _order_run_dirs(a.config or DEFAULT_CONFIG, a.stamp), True
     if not a.runs:
         ap.error("--runs or --orders is required")
 

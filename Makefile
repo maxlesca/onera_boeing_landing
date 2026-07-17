@@ -34,8 +34,8 @@ evaluate:  ## metrics + ablations of a run: make evaluate RUN=runs/<name>/<times
 plots:  ## curves/ablation/sweeps: make plots RUNS="..." (SAVE=1 -> PNG; BARS=1 -> best-val_loss bars; NOISE=0.005)
 	$(PYTHON) -m boeing_landing.report --runs $(RUNS) $(if $(SAVE),--save) $(if $(BARS),--bars) $(if $(NOISE),--noise $(NOISE))
 
-plots-orders:  ## bar chart of the conv-order sweep (auto-discovers runs; SAVE=1 -> PNG)
-	$(PYTHON) -m boeing_landing.report --orders $(if $(SAVE),--save) $(if $(NOISE),--noise $(NOISE))
+plots-orders:  ## conv-order sweep bars: CONFIG=<pipeline> STAMP=<session prefix> SAVE=1
+	$(PYTHON) -m boeing_landing.report --orders --config $(CFGPATH) $(if $(STAMP),--stamp $(STAMP)) $(if $(SAVE),--save) $(if $(NOISE),--noise $(NOISE))
 
 experiment-order:  ## sweep the conv channel orders and compare val loss
 	$(PYTHON) -m boeing_landing.experiments.feature_order --config $(CFGPATH)
