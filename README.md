@@ -15,8 +15,10 @@ environment.yml           conda env (reads requirements.txt)
 boeing_landing/           project code
   data/build_dataset.py     CSV -> npz (GPS in, ILS out, per-run split)
   data/features.py          input/label lists + channel orders for the conv
+  data/runways.py           runway corners (ECEF) from published geometry
   data/loader.py            npz -> fixed-length portions -> training tensors
   configs/gps_cfc.yaml      one pipeline = one config (single control panel)
+  configs/gps_corners_cfc.yaml   same + the 4 runway corners as inputs
   experiments/feature_order.py   sweep conv channel orders
   experiments/convergence.py     seed-stability study
   train.py                  assemble + fit_and_save (generic, config-driven)
@@ -65,6 +67,12 @@ This writes `landing_{train,val}.npz` into the config's `build.out_dir`
 (18 inputs = inertial + GPS + wind, ILS excluded), split per run with
 normalisation bounds computed on the train split only.
 
+The `build:` section can extend the inputs: `runway_corners: true` appends the
+4 corners of the landing runway (12 ECEF channels, from `data/runways.py`,
+calibrated against the sim's localizer), `extra_columns: [...]` appends other
+CSV columns as-is. Each pipeline config owns its dataset directory, e.g.
+`make dataset CONFIG=gps_corners_cfc` builds `datasets/gps_corners/`.
+
 ## Usage
 
 ```bash
@@ -74,7 +82,7 @@ make train               # train the default pipeline (gps_cfc)
 make train ORDER=gps_last            # pick a conv channel order
 make train CONFIG=gps_cfc            # pick a pipeline config
 make evaluate RUN=runs/<n>/<ts>      # metrics + feature-group ablations
-make plots RUNS="runs/<n>/<ts>"      # training curves (several RUNS = comparison)
+make plots RUNS="runs/<n>/<ts>"      # curves + per-command MSE + ablation (several RUNS = comparison)
 make plots RUNS="..." SAVE=1         # save PNG instead of showing
 make experiment-order          # sweep channel orders, rank by val_loss
 make experiment-convergence    # same config, several seeds (stability)
@@ -126,7 +134,7 @@ Data knobs:
 |---|---|
 | `dataset.portion_len` | portion length in frames (125 = 5 s at 25 Hz) |
 | `dataset.stride` | step between portions (overlap) |
-| `dataset.input_order` | conv channel order: `grouped`, `gps_last`, `pos_vel`, `by_axis`, `reversed`, `random_1..3` |
+| `dataset.input_order` | conv channel order: `grouped`, `gps_last`, `pos_vel`, `by_axis`, `reversed`, `random_1..3` (dataset-only channels, e.g. corners, are appended at the end) |
 | `dataset.use_dt` | append the per-frame time step as CfC timespans (baseline recipe) |
 | `sequencing.seq_len` | 1 — the conv sees one frame at a time, over the feature axis |
 

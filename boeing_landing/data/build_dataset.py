@@ -28,6 +28,7 @@ import numpy as np
 import pandas as pd
 
 from boeing_landing.data.features import CANONICAL_INPUTS, LABELS
+from boeing_landing.data.runways import CORNERS, corner_features
 
 
 def load_csv(source: Path) -> pd.DataFrame:
@@ -40,14 +41,23 @@ def load_csv(source: Path) -> pd.DataFrame:
     return pd.read_csv(source, sep=";")
 
 
-def clean(df: pd.DataFrame) -> pd.DataFrame:
+def clean(df: pd.DataFrame, extra: list[str] = ()) -> pd.DataFrame:
     """Drop rows with missing fields, add an int `run`, sort by (run, time)."""
     n_total = len(df)
-    needed = ["simulationindex", "time", "image_filename"] + CANONICAL_INPUTS + LABELS
+    needed = ["simulationindex", "time", "image_filename"] + CANONICAL_INPUTS + LABELS + list(extra)
     df = df.dropna(subset=needed).copy()
     print(f"{n_total} rows read, {n_total - len(df)} dropped (NaN), {len(df)} kept")
     df["run"] = df["simulationindex"].astype(int)
     return df.sort_values(["run", "time"]).reset_index(drop=True)
+
+
+def add_runway_corners(df: pd.DataFrame) -> pd.DataFrame:
+    """Append the 12 ECEF corner columns of each frame's landing runway."""
+    pairs = {(a, r): corner_features(a, r)
+             for a, r in df[["airport", "runway"]].drop_duplicates().itertuples(index=False)}
+    corners = pd.DataFrame([pairs[(a, r)] for a, r in zip(df["airport"], df["runway"])],
+                           index=df.index)
+    return pd.concat([df, corners], axis=1)
 
 
 def split_runs(df: pd.DataFrame, val_runs: set[int]) -> tuple[pd.DataFrame, pd.DataFrame]:
@@ -59,13 +69,13 @@ def split_runs(df: pd.DataFrame, val_runs: set[int]) -> tuple[pd.DataFrame, pd.D
     return df[~val_mask], df[val_mask]
 
 
-def compute_bounds(train: pd.DataFrame) -> dict:
+def compute_bounds(train: pd.DataFrame, inputs: list[str]) -> dict:
     """Min/max normalisation bounds from the train split only."""
     return {
-        "inputs": CANONICAL_INPUTS,
+        "inputs": inputs,
         "labels": LABELS,
-        "x_min": train[CANONICAL_INPUTS].min().tolist(),
-        "x_max": train[CANONICAL_INPUTS].max().tolist(),
+        "x_min": train[inputs].min().tolist(),
+        "x_max": train[inputs].max().tolist(),
         "y_min": train[LABELS].min().tolist(),
         "y_max": train[LABELS].max().tolist(),
     }
@@ -73,14 +83,15 @@ def compute_bounds(train: pd.DataFrame) -> dict:
 
 def save_split(name: str, part: pd.DataFrame, bounds: dict, out_dir: Path) -> None:
     """Write one split to `landing_<name>.npz` (raw values + embedded bounds)."""
+    inputs = bounds["inputs"]
     np.savez_compressed(
         out_dir / f"landing_{name}.npz",
-        X=part[CANONICAL_INPUTS].to_numpy(np.float32),
+        X=part[inputs].to_numpy(np.float32),
         Y=part[LABELS].to_numpy(np.float32),
         run=part["run"].to_numpy(np.int32),
         t=part["time"].to_numpy(np.float32),
         image=part["image_filename"].to_numpy(),
-        input_names=np.array(CANONICAL_INPUTS),
+        input_names=np.array(inputs),
         label_names=np.array(LABELS),
         x_min=np.array(bounds["x_min"], np.float32),
         x_max=np.array(bounds["x_max"], np.float32),
@@ -91,16 +102,24 @@ def save_split(name: str, part: pd.DataFrame, bounds: dict, out_dir: Path) -> No
           f"-> {out_dir / f'landing_{name}.npz'}")
 
 
-def build(source: Path, val_runs: set[int], out_dir: Path) -> None:
-    df = clean(load_csv(source))
+def build(source: Path, val_runs: set[int], out_dir: Path,
+          runway_corners: bool = False, extra_columns: list[str] = ()) -> None:
+    """extra_columns: additional CSV columns appended as inputs.
+    runway_corners: append the 12 ECEF corners of the landing runway."""
+    extra = list(extra_columns) + (["airport", "runway"] if runway_corners else [])
+    df = clean(load_csv(source), extra)
+    inputs = CANONICAL_INPUTS + list(extra_columns)
+    if runway_corners:
+        df = add_runway_corners(df)
+        inputs = inputs + CORNERS
     train, val = split_runs(df, val_runs)
-    bounds = compute_bounds(train)
+    bounds = compute_bounds(train, inputs)
 
     out_dir.mkdir(parents=True, exist_ok=True)
     save_split("train", train, bounds, out_dir)
     save_split("val", val, bounds, out_dir)
     (out_dir / "normalization_bounds.json").write_text(json.dumps(bounds, indent=2), encoding="utf-8")
-    print(f"inputs={len(CANONICAL_INPUTS)} (incl. GPS, no ILS), labels={len(LABELS)}")
+    print(f"inputs={len(inputs)} (incl. GPS, no ILS), labels={len(LABELS)}")
 
 
 def main() -> None:
@@ -115,7 +134,9 @@ def main() -> None:
 
     build_cfg = load_yaml(a.config).get("build", {})
     val_runs = {int(r) for r in build_cfg.get("val_runs", [8])}
-    build(a.source, val_runs, Path(build_cfg.get("out_dir", "datasets/gps_no_ils")))
+    build(a.source, val_runs, Path(build_cfg.get("out_dir", "datasets/gps_no_ils")),
+          runway_corners=bool(build_cfg.get("runway_corners", False)),
+          extra_columns=build_cfg.get("extra_columns") or [])
 
 
 if __name__ == "__main__":

@@ -17,12 +17,14 @@ from pathlib import Path
 
 from boeing_landing.data.features import (ANGULAR_RATES, ATTITUDE, BODY_VELOCITY,
                                           GPS, LABELS, NED_VELOCITY, WIND)
+from boeing_landing.data.runways import CORNERS
 from boeing_landing.train import _load_split, _resolve_order
 from utils.config import load_yaml
 from utils.evaluation import (evaluate_arrays, metrics, plot_predictions,
                               regression_metrics, run_ablation_suite)
 
-# Masked one group at a time to measure each group's contribution.
+# Masked one group at a time to measure each group's contribution. Groups the
+# run's dataset does not have (e.g. corners) are filtered out per run.
 ABLATION_GROUPS = {
     "gps": GPS,
     "attitude": ATTITUDE,
@@ -30,7 +32,14 @@ ABLATION_GROUPS = {
     "body_velocity": BODY_VELOCITY,
     "ned_velocity": NED_VELOCITY,
     "wind": WIND,
+    "corners": CORNERS,
 }
+
+
+def _ablation_groups(input_labels: list[str]) -> dict:
+    """Only the groups whose channels this run actually has."""
+    return {name: channels for name, channels in ABLATION_GROUPS.items()
+            if set(channels) <= set(input_labels)}
 
 
 def _find_run_files(run_dir: Path) -> tuple[dict, Path]:
@@ -69,7 +78,7 @@ def _ablation_results(config: dict, checkpoint: Path, inputs, outputs) -> dict:
     velocity here, not the quadrotor's 4-motor command vector)."""
     ablation_cfg = {"enabled": True,
                     "fill_value": config.get("evaluation", {}).get("fill_value", 0.0),
-                    "feature_sets": ABLATION_GROUPS}
+                    "feature_sets": _ablation_groups(config["dataset"].get("input_labels", []))}
     return dict(run_ablation_suite(config, config["dataloader"], checkpoint,
                                    inputs, outputs, ablation_cfg, expand_labels=False))
 

@@ -18,10 +18,12 @@ from datetime import datetime
 from pathlib import Path
 
 import lightning as L
+import numpy as np
 import torch
 from lightning.pytorch.callbacks import EarlyStopping, ModelCheckpoint
 
-from boeing_landing.data.features import CANONICAL_INPUTS, FEATURE_ORDERS, LABELS
+from boeing_landing.data.features import (CANONICAL_INPUTS, FEATURE_ORDERS, LABELS,
+                                          extend_order)
 from boeing_landing.data.loader import load_portions
 from utils.config import ensure_dir, load_yaml, save_yaml
 from utils.data import DatasetController, transform_to_sequence
@@ -35,7 +37,11 @@ DEFAULT_CONFIG = PROJECT_ROOT / "boeing_landing" / "configs" / "gps_cfc.yaml"
 
 
 def _resolve_order(dataset_cfg: dict) -> list[str]:
-    return FEATURE_ORDERS.get(dataset_cfg.get("input_order", "grouped"), CANONICAL_INPUTS)
+    """The named channel order, extended with the dataset's own extra channels
+    (runway corners, extra columns) so labels always match the real tensors."""
+    order = FEATURE_ORDERS.get(dataset_cfg.get("input_order", "grouped"), CANONICAL_INPUTS)
+    names = np.load(dataset_cfg["train_npz"], allow_pickle=True)["input_names"]
+    return extend_order(order, [str(n) for n in names])
 
 
 def _sequence(x, y, seq_len: int):

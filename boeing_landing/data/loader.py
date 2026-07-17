@@ -18,14 +18,15 @@ from pathlib import Path
 
 import numpy as np
 
-from boeing_landing.data.features import CANONICAL_INPUTS, check_order
+from boeing_landing.data.features import CANONICAL_INPUTS, extend_order
 
 
 def _reorder_inputs(npz, input_order: list[str]):
-    """Return X and its (min, max) bounds reordered to `input_order`."""
-    check_order(input_order)
-    names = list(npz["input_names"])
-    idx = [names.index(n) for n in input_order]
+    """Return X and its (min, max) bounds reordered to `input_order` (extended
+    with any dataset-only channels, e.g. the runway corners)."""
+    names = [str(n) for n in npz["input_names"]]
+    order = extend_order(input_order, names)
+    idx = [names.index(n) for n in order]
     return npz["X"][:, idx], npz["x_min"][idx], npz["x_max"][idx]
 
 
