@@ -114,9 +114,14 @@ make plots-orders [CONFIG=gps_cfc] [STAMP=prefix] [SAVE=1] [NOISE=0.005]
 make experiment-order [CONFIG=gps_cfc]        # train one run per channel order, rank by val_loss
 make experiment-convergence [CONFIG=gps_cfc]  # same config under experiments.seeds (stability)
 
-make quadrotor-train     # train the quadrotor baseline
+make quadrotor-train     # train the quadrotor baseline (its own train_config.yaml)
+make quadrotor-test [PLOT=1]   # evaluate it (model picked in its test_config.yaml)
 make clean               # remove runs/, logs, caches (figures/ is kept)
 ```
+
+The quadrotor baseline is a reference implementation and keeps its own
+config/checkpoint layout: the boeing-side options (`CONFIG=`, `RUN=`,
+`RUNS=`) do not apply to it.
 
 Every target also accepts `PYTHON=...` to override the auto-detected
 interpreter (e.g. `make train PYTHON=python`).

@@ -12,7 +12,8 @@ ORDER   ?= grouped
 CFGPATH  = $(if $(findstring .yaml,$(CONFIG)),$(if $(findstring /,$(CONFIG)),$(CONFIG),boeing_landing/pipelines/$(basename $(CONFIG))/base.yaml),$(if $(findstring /,$(CONFIG)),boeing_landing/pipelines/$(CONFIG).yaml,boeing_landing/pipelines/$(CONFIG)/base.yaml))
 
 .DEFAULT_GOAL := help
-.PHONY: help install deps dataset train evaluate plots experiment-order experiment-convergence quadrotor-train clean
+.PHONY: help install deps dataset augment trajectories train evaluate plots plots-orders \
+        experiment-order experiment-convergence quadrotor-train quadrotor-test clean
 
 help:  ## show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | \
@@ -57,8 +58,11 @@ experiment-order:  ## sweep the conv channel orders and compare val loss
 experiment-convergence:  ## train the config under several seeds (experiments.seeds)
 	$(PYTHON) -m boeing_landing.experiments.convergence --config $(CFGPATH)
 
-quadrotor-train:  ## train the quadrotor baseline
+quadrotor-train:  ## train the quadrotor baseline (settings: quadrotor_baseline/train_config.yaml)
 	$(PYTHON) -m quadrotor_baseline.train
+
+quadrotor-test:  ## evaluate the quadrotor baseline (model picked in test_config.yaml; PLOT=1)
+	$(PYTHON) -m quadrotor_baseline.test $(if $(PLOT),--plot)
 
 clean:  ## remove generated runs, logs and __pycache__ caches
 	rm -rf lightning_logs runs
