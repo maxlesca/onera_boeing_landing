@@ -1,7 +1,9 @@
 # gps_corners_cfc pipeline: inertial + GPS + runway corners -> Conv1D -> CfC
 # -> commands. Same as gps_cfc plus 12 constant channels giving the landing
-# runway's 4 corners in ECEF (see data/runways.py) -- the target geometry made
-# explicit, first step toward an error-to-runway formulation.
+# runway's 4 corners in the aircraft-GPS representation -- lat/lon in radians
+# and altitude in meters, like the latitude/longitude/altitude channels (see
+# data/runways.py) -- the target geometry made explicit, first step toward an
+# error-to-runway formulation.
 # Paths are relative to the repo root (run from onera_boeing_landing/).
 
 training:
@@ -20,7 +22,7 @@ training:
 build:
   val_runs: [8]              # runs held out for validation
   out_dir: datasets/gps_corners  # inside the repo, gitignored (same layout as the baseline)
-  runway_corners: true       # append the 4 runway corners (ECEF) as 12 input channels
+  runway_corners: true       # append the 4 runway corners (lat/lon rad + alt m) as 12 input channels
   extra_columns: [touchdown_flag]  # extra CSV columns appended as inputs. Note:
                              # touchdown_flag is True on a single frame (run 7) --
                              # the recordings stop at touchdown, so the channel is

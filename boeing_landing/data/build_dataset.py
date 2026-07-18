@@ -52,7 +52,8 @@ def clean(df: pd.DataFrame, extra: list[str] = ()) -> pd.DataFrame:
 
 
 def add_runway_corners(df: pd.DataFrame) -> pd.DataFrame:
-    """Append the 12 ECEF corner columns of each frame's landing runway."""
+    """Append the 12 corner columns (lat rad, lon rad, alt m per corner) of
+    each frame's landing runway -- the aircraft-GPS representation."""
     pairs = {(a, r): corner_features(a, r)
              for a, r in df[["airport", "runway"]].drop_duplicates().itertuples(index=False)}
     corners = pd.DataFrame([pairs[(a, r)] for a, r in zip(df["airport"], df["runway"])],
@@ -105,7 +106,7 @@ def save_split(name: str, part: pd.DataFrame, bounds: dict, out_dir: Path) -> No
 def build(source: Path, val_runs: set[int], out_dir: Path,
           runway_corners: bool = False, extra_columns: list[str] = ()) -> None:
     """extra_columns: additional CSV columns appended as inputs.
-    runway_corners: append the 12 ECEF corners of the landing runway."""
+    runway_corners: append the landing runway's 12 corner channels."""
     extra = list(extra_columns) + (["airport", "runway"] if runway_corners else [])
     df = clean(load_csv(source), extra)
     inputs = CANONICAL_INPUTS + list(extra_columns)

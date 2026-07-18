@@ -15,7 +15,7 @@ environment.yml           conda env (reads requirements.txt)
 boeing_landing/           project code
   data/build_dataset.py     CSV -> npz (GPS in, ILS out, per-run split)
   data/features.py          input/label lists + channel orders for the conv
-  data/runways.py           runway corners (ECEF) from published geometry
+  data/runways.py           runway corners (aircraft-GPS coords) from published geometry
   data/loader.py            npz -> fixed-length portions -> training tensors
   configs/gps_cfc.yaml      one pipeline = one config (single control panel)
   configs/gps_corners_cfc.yaml   same + the 4 runway corners as inputs
@@ -69,7 +69,8 @@ This writes `landing_{train,val}.npz` into the config's `build.out_dir`
 normalisation bounds computed on the train split only.
 
 The `build:` section can extend the inputs: `runway_corners: true` appends the
-4 corners of the landing runway (12 ECEF channels, from `data/runways.py`,
+4 corners of the landing runway (12 channels, lat/lon in radians + altitude in
+meters — the same representation as the aircraft GPS — from `data/runways.py`,
 calibrated against the sim's localizer), `extra_columns: [...]` appends other
 CSV columns as-is. Each pipeline config owns its dataset directory, e.g.
 `make dataset CONFIG=gps_corners_cfc` builds `datasets/gps_corners/`.

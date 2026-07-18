@@ -1,12 +1,15 @@
 # -*- coding: utf-8 -*-
 """Runway geometry: published threshold coordinates -> the 4 runway corners.
 
-Corners are returned in ECEF meters (a global cartesian frame, no angular
-units, no pole/antimeridian issues) and named relative to the LANDING
-direction: thr_* = the threshold the aircraft crosses, end_* = the opposite
-end, left/right as seen from the approaching aircraft. The same physical
-runway therefore yields different corner ordering for its two landing
-directions, which is what the controller cares about.
+Corners are returned in the aircraft-GPS representation of the dataset --
+latitude/longitude in RADIANS and altitude in meters, exactly like the CSV's
+latitude/longitude/altitude channels -- so the network compares like with
+like. ECEF is only used internally to apply the metric width/offset geometry.
+Corners are named relative to the LANDING direction: thr_* = the threshold
+the aircraft crosses, end_* = the opposite end, left/right as seen from the
+approaching aircraft. The same physical runway therefore yields different
+corner ordering for its two landing directions, which is what the controller
+cares about.
 
 Coordinates: OpenStreetMap runway geometry (physical runway ends, WGS84).
 Validated against the simulator's own localizer: the axis direction matches
@@ -44,10 +47,11 @@ THRESHOLDS = {
 # runway's landing direction; the reciprocal end flips the sign automatically.
 LATERAL_OFFSETS = {"ZBTJ": {"16R": -5.2, "16L": 2.2}}
 
-# 12 input channels: 4 corners x ECEF x,y,z.
-CORNERS = [f"{corner}_{axis}"
+# 12 input channels: 4 corners x (lat rad, lon rad, alt m) -- the same
+# units/representation as the aircraft latitude/longitude/altitude channels.
+CORNERS = [f"{corner}_{field}"
            for corner in ("thr_left", "thr_right", "end_left", "end_right")
-           for axis in ("x", "y", "z")]
+           for field in ("lat", "lon", "alt")]
 
 
 def geodetic_to_ecef(lat_deg: float, lon_deg: float, h: float) -> np.ndarray:
@@ -57,6 +61,20 @@ def geodetic_to_ecef(lat_deg: float, lon_deg: float, h: float) -> np.ndarray:
     return np.array([(n + h) * np.cos(lat) * np.cos(lon),
                      (n + h) * np.cos(lat) * np.sin(lon),
                      (n * (1 - _E2) + h) * np.sin(lat)])
+
+
+def ecef_to_geodetic(p: np.ndarray) -> np.ndarray:
+    """ECEF meters -> WGS84 (lat rad, lon rad, alt m), Bowring's closed form
+    (sub-mm accurate near the surface)."""
+    x, y, z = p
+    lon = np.arctan2(y, x)
+    r = np.hypot(x, y)
+    b = _A * (1 - _F)
+    u = np.arctan2(z * _A, r * b)
+    lat = np.arctan2(z + (_A**2 - b**2) / b * np.sin(u) ** 3,
+                     r - _E2 * _A * np.cos(u) ** 3)
+    n = _A / np.sqrt(1 - _E2 * np.sin(lat) ** 2)
+    return np.array([lat, lon, r / np.cos(lat) - n])
 
 
 def _up(lat_deg: float, lon_deg: float) -> np.ndarray:
@@ -79,7 +97,8 @@ def _lateral_offset(airport: str, runway: str, opposite: str) -> float:
 
 
 def runway_corners(airport: str, runway: str) -> np.ndarray:
-    """(4, 3) ECEF corners of the landing runway, ordered as in CORNERS."""
+    """(4, 3) corners of the landing runway as (lat rad, lon rad, alt m),
+    ordered as in CORNERS. The width/offset geometry is applied in ECEF."""
     airport, runway = airport.strip(), runway.strip()
     opposite = opposite_end(runway)
     thr_geo = THRESHOLDS[airport][runway]
@@ -92,7 +111,8 @@ def runway_corners(airport: str, runway: str) -> np.ndarray:
     right /= np.linalg.norm(right)
     half = 0.5 * width * right
     corners = np.stack([thr - half, thr + half, end - half, end + half])
-    return corners + _lateral_offset(airport, runway, opposite) * right
+    corners += _lateral_offset(airport, runway, opposite) * right
+    return np.stack([ecef_to_geodetic(c) for c in corners])
 
 
 def corner_features(airport: str, runway: str) -> dict[str, float]:
