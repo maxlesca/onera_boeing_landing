@@ -38,7 +38,7 @@ DEFAULT_CONFIG = PROJECT_ROOT / "boeing_landing" / "configs" / "gps_cfc.yaml"
 
 def _resolve_order(dataset_cfg: dict) -> list[str]:
     """The named channel order, extended with the dataset's own extra channels
-    (runway corners, extra columns) so labels always match the real tensors."""
+    (extra_columns) so labels always match the real tensors."""
     order = FEATURE_ORDERS.get(dataset_cfg.get("input_order", "grouped"), CANONICAL_INPUTS)
     names = np.load(dataset_cfg["train_npz"], allow_pickle=True)["input_names"]
     return extend_order(order, [str(n) for n in names])

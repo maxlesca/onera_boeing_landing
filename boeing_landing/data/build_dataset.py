@@ -28,7 +28,6 @@ import numpy as np
 import pandas as pd
 
 from boeing_landing.data.features import CANONICAL_INPUTS, LABELS
-from boeing_landing.data.runways import CORNERS, corner_features
 
 
 def load_csv(source: Path) -> pd.DataFrame:
@@ -49,16 +48,6 @@ def clean(df: pd.DataFrame, extra: list[str] = ()) -> pd.DataFrame:
     print(f"{n_total} rows read, {n_total - len(df)} dropped (NaN), {len(df)} kept")
     df["run"] = df["simulationindex"].astype(int)
     return df.sort_values(["run", "time"]).reset_index(drop=True)
-
-
-def add_runway_corners(df: pd.DataFrame) -> pd.DataFrame:
-    """Append the 12 corner columns (lat rad, lon rad, alt m per corner) of
-    each frame's landing runway -- the aircraft-GPS representation."""
-    pairs = {(a, r): corner_features(a, r)
-             for a, r in df[["airport", "runway"]].drop_duplicates().itertuples(index=False)}
-    corners = pd.DataFrame([pairs[(a, r)] for a, r in zip(df["airport"], df["runway"])],
-                           index=df.index)
-    return pd.concat([df, corners], axis=1)
 
 
 def split_runs(df: pd.DataFrame, val_runs: set[int]) -> tuple[pd.DataFrame, pd.DataFrame]:
@@ -104,15 +93,10 @@ def save_split(name: str, part: pd.DataFrame, bounds: dict, out_dir: Path) -> No
 
 
 def build(source: Path, val_runs: set[int], out_dir: Path,
-          runway_corners: bool = False, extra_columns: list[str] = ()) -> None:
-    """extra_columns: additional CSV columns appended as inputs.
-    runway_corners: append the landing runway's 12 corner channels."""
-    extra = list(extra_columns) + (["airport", "runway"] if runway_corners else [])
-    df = clean(load_csv(source), extra)
+          extra_columns: list[str] = ()) -> None:
+    """extra_columns: additional CSV columns appended as inputs."""
+    df = clean(load_csv(source), list(extra_columns))
     inputs = CANONICAL_INPUTS + list(extra_columns)
-    if runway_corners:
-        df = add_runway_corners(df)
-        inputs = inputs + CORNERS
     train, val = split_runs(df, val_runs)
     bounds = compute_bounds(train, inputs)
 
@@ -136,7 +120,6 @@ def main() -> None:
     build_cfg = load_yaml(a.config).get("build", {})
     val_runs = {int(r) for r in build_cfg.get("val_runs", [8])}
     build(a.source, val_runs, Path(build_cfg.get("out_dir", "datasets/gps_no_ils")),
-          runway_corners=bool(build_cfg.get("runway_corners", False)),
           extra_columns=build_cfg.get("extra_columns") or [])
 
 

@@ -37,7 +37,7 @@ LABELS = ["longitudinal", "lateral", "directional", "stabilizer",
 
 def extend_order(order: list[str], available: list[str]) -> list[str]:
     """`order` completed with the channels the dataset holds beyond it (e.g.
-    the runway corners), appended in dataset order. The named orders therefore
+    extra_columns), appended in dataset order. The named orders therefore
     stay dataset-agnostic. Names unknown to the dataset are an error (typo guard)."""
     unknown = set(order) - set(available)
     if unknown:
@@ -57,8 +57,8 @@ _GROUPS = [GPS, ATTITUDE, ANGULAR_RATES, BODY_VELOCITY, NED_VELOCITY, WIND]
 BY_AXIS = [g[i] for i in range(3) for g in _GROUPS]
 
 # Named channel orders for the conv-ordering study. Each is a permutation of
-# CANONICAL_INPUTS; channels a dataset holds beyond them (runway corners,
-# extra columns) are appended at the end by extend_order at load time.
+# CANONICAL_INPUTS; channels a dataset holds beyond them (extra_columns)
+# are appended at the end by extend_order at load time.
 FEATURE_ORDERS = {
     "grouped": CANONICAL_INPUTS,                                               # by physical group (GPS first)
     "gps_last": ATTITUDE + ANGULAR_RATES + BODY_VELOCITY + NED_VELOCITY + WIND + GPS,

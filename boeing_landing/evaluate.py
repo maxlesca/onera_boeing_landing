@@ -17,14 +17,13 @@ from pathlib import Path
 
 from boeing_landing.data.features import (ANGULAR_RATES, ATTITUDE, BODY_VELOCITY,
                                           GPS, LABELS, NED_VELOCITY, WIND)
-from boeing_landing.data.runways import CORNERS
 from boeing_landing.train import _load_split, _resolve_order
 from utils.config import load_yaml
 from utils.evaluation import (evaluate_arrays, metrics, plot_predictions,
                               regression_metrics, run_ablation_suite)
 
 # Masked one group at a time to measure each group's contribution. Groups the
-# run's dataset does not have (e.g. corners) are filtered out per run.
+# run's dataset does not have are filtered out per run.
 ABLATION_GROUPS = {
     "gps": GPS,
     "attitude": ATTITUDE,
@@ -32,7 +31,6 @@ ABLATION_GROUPS = {
     "body_velocity": BODY_VELOCITY,
     "ned_velocity": NED_VELOCITY,
     "wind": WIND,
-    "corners": CORNERS,
     "touchdown": ["touchdown_flag"],
 }
 

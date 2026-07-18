@@ -23,7 +23,7 @@ from boeing_landing.data.features import CANONICAL_INPUTS, extend_order
 
 def _reorder_inputs(npz, input_order: list[str]):
     """Return X and its (min, max) bounds reordered to `input_order` (extended
-    with any dataset-only channels, e.g. the runway corners)."""
+    with any dataset-only channels, e.g. extra_columns)."""
     names = [str(n) for n in npz["input_names"]]
     order = extend_order(input_order, names)
     idx = [names.index(n) for n in order]
