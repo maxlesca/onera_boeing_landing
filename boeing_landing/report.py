@@ -187,18 +187,20 @@ def plot_best_bars(run_dirs: list[Path], ax, noise: float = 0.0) -> None:
 
 
 def _figure_path(run_dirs: list[Path], bars: bool) -> Path:
-    """Saved PNGs all go to one flat figures/ folder at the repo root, named
-    after what they show -- easy to browse, never buried inside the run dirs."""
+    """Saved PNGs go to figures/<pipeline>/, mirroring the runs organization
+    (never inside the run dirs). Plots mixing several pipelines land in
+    figures/comparisons/."""
     from boeing_landing.train import PROJECT_ROOT
     from utils.config import ensure_dir
 
+    pipelines = sorted({d.parent.parent.name for d in run_dirs})
+    folder = pipelines[0] if len(pipelines) == 1 else "comparisons"
     if len(run_dirs) == 1:
-        name = "_".join(run_dirs[0].parts[-3:])  # pipeline_variant_timestamp
+        name = "_".join(run_dirs[0].parts[-2:])  # variant_timestamp
     else:
         kind = "bars" if bars else "comparison"
-        pipelines = sorted({d.parent.parent.name for d in run_dirs})
         name = f"{'_'.join(pipelines)}_{kind}_{datetime.now():%Y%m%d_%H%M%S}"
-    return ensure_dir(PROJECT_ROOT / "figures") / f"{name}.png"
+    return ensure_dir(PROJECT_ROOT / "figures" / folder) / f"{name}.png"
 
 
 def _style_loss_ax(ax) -> None:

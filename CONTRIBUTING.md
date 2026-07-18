@@ -52,4 +52,4 @@ Makefile target.
 - No code duplication: shared logic moves to `utils/`.
 - Parameters belong in configs, never hardcoded in `.py`.
 - Every training run writes to its own `runs/<pipeline>/<variant>/<timestamp>/`
-  directory; saved plots go to the flat `figures/` folder, never into the runs.
+  directory; saved plots go to `figures/<pipeline>/`, never into the runs.

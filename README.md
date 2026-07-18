@@ -30,7 +30,7 @@ dataset_preparation/      dataset tools (image crop, rosbag extract)
 Yolo_models_LARD_V2/      submodule (YOLO models)
 datasets/                 built npz files (gitignored, created by make dataset)
 runs/                     training outputs (gitignored), one subfolder per pipeline
-figures/                  saved plots (gitignored), one flat folder (make plots SAVE=1)
+figures/                  saved plots (gitignored), one subfolder per pipeline (make plots SAVE=1)
 ```
 
 ## Install
@@ -96,7 +96,7 @@ make evaluate RUN=runs/<pipeline>/<variant>/<timestamp>
 
 make plots RUNS="runs/.../<ts> [more...]" [SAVE=1] [BARS=1] [NOISE=0.005]
     # one run: curves + per-command MSE + ablation panels; several: comparison.
-    # SAVE=1: write the PNG into figures/ (named after the runs) instead of a window.
+    # SAVE=1: write the PNG into figures/<pipeline>/ (named after the runs) instead of a window.
     # BARS=1: several runs as best-val_loss bars instead of overlaid curves.
     # NOISE: seed-noise threshold line on the bar charts (0 = none).
 
@@ -196,8 +196,9 @@ runs/<pipeline>/<variant>/<timestamp>/
 ```
 
 Saved plots never go into the run folders: `make plots ... SAVE=1` writes them
-all to the flat `figures/` folder, named `<pipeline>_<variant>_<timestamp>.png`
-(comparisons: `<pipelines>_comparison_<date>.png` / `..._bars_...`).
+to `figures/<pipeline>/`, named `<variant>_<timestamp>.png` (single run) or
+`<pipelines>_<comparison|bars>_<date>.png`; plots mixing several pipelines go
+to `figures/comparisons/`.
 
 ## Contributing
 
