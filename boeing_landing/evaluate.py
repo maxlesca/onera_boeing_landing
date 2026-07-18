@@ -6,7 +6,7 @@ checkpoint, evaluate on the validation split, then rerun with feature groups
 masked to measure each group's contribution. All the machinery lives in
 utils/evaluation.py; only the data loading is landing-specific.
 
-    python -m boeing_landing.evaluate --run runs/gps_cfc_grouped/<timestamp>
+    python -m boeing_landing.evaluate --run runs/gps_cfc/grouped/<timestamp>
 """
 
 from __future__ import annotations

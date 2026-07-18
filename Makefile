@@ -30,10 +30,10 @@ dataset:  ## build the npz from the CSV (val runs / out dir come from the config
 train:  ## train a pipeline: make train CONFIG=gps_cfc ORDER=grouped (EPOCHS=3 for a quick trial)
 	$(PYTHON) -m boeing_landing.train --config $(CFGPATH) --input-order $(ORDER) $(if $(EPOCHS),--max-epochs $(EPOCHS))
 
-evaluate:  ## metrics + ablations of a run: make evaluate RUN=runs/<name>/<timestamp>
+evaluate:  ## metrics + ablations of a run: make evaluate RUN=runs/<pipeline>/<variant>/<timestamp>
 	$(PYTHON) -m boeing_landing.evaluate --run $(RUN)
 
-plots:  ## curves/ablation/sweeps: make plots RUNS="..." (SAVE=1 -> PNG; BARS=1 -> best-val_loss bars; NOISE=0.005)
+plots:  ## curves/ablation/sweeps: make plots RUNS="..." (SAVE=1 -> PNG in figures/; BARS=1 -> best-val_loss bars; NOISE=0.005)
 	$(PYTHON) -m boeing_landing.report --runs $(RUNS) $(if $(SAVE),--save) $(if $(BARS),--bars) $(if $(NOISE),--noise $(NOISE))
 
 plots-orders:  ## conv-order sweep bars: CONFIG=<pipeline> STAMP=<session prefix> SAVE=1

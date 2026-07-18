@@ -51,4 +51,5 @@ Makefile target.
 - Small single-purpose functions; split rather than grow.
 - No code duplication: shared logic moves to `utils/`.
 - Parameters belong in configs, never hardcoded in `.py`.
-- Every training run writes to its own `runs/<name>/<timestamp>/` directory.
+- Every training run writes to its own `runs/<pipeline>/<variant>/<timestamp>/`
+  directory; saved plots go to the flat `figures/` folder, never into the runs.

@@ -29,7 +29,8 @@ quadrotor_baseline/       reference quadrotor controller and pretrained models
 dataset_preparation/      dataset tools (image crop, rosbag extract)
 Yolo_models_LARD_V2/      submodule (YOLO models)
 datasets/                 built npz files (gitignored, created by make dataset)
-runs/                     training outputs (gitignored)
+runs/                     training outputs (gitignored), one subfolder per pipeline
+figures/                  saved plots (gitignored), one flat folder (make plots SAVE=1)
 ```
 
 ## Install
@@ -75,22 +76,42 @@ CSV columns as-is. Each pipeline config owns its dataset directory, e.g.
 
 ## Usage
 
+`make` alone lists the targets. Each target below is shown with every option it
+accepts (`OPT=value`); options in brackets are optional and show their default.
+
 ```bash
-make                     # list targets
-make dataset CSV=...     # build the npz
-make train               # train the default pipeline (gps_cfc)
-make train ORDER=gps_last            # pick a conv channel order
-make train CONFIG=gps_cfc            # pick a pipeline config
-make evaluate RUN=runs/<n>/<ts>      # metrics + feature-group ablations
-make plots RUNS="runs/<n>/<ts>"      # curves + per-command MSE + ablation (several RUNS = comparison)
-make plots RUNS="..." SAVE=1         # save PNG instead of showing
-make experiment-order          # sweep channel orders, rank by val_loss
-make experiment-convergence    # same config, several seeds (stability)
+make dataset CSV=path/to.csv [CONFIG=gps_cfc]
+    # build the npz from the CSV. CSV: source file (machine-specific).
+    # CONFIG: pipeline whose build: section decides val runs / out dir / extra inputs.
+
+make train [CONFIG=gps_cfc] [ORDER=grouped] [EPOCHS=n]
+    # CONFIG: pipeline name (gps_cfc, gps_corners_cfc, with or without .yaml) or path to a yaml.
+    # ORDER: conv channel order — grouped, gps_first, gps_last, pos_vel, by_axis,
+    #        reversed, random_1..3 (see data/features.py).
+    # EPOCHS: override training.max_epochs for a quick trial (e.g. EPOCHS=3).
+
+make evaluate RUN=runs/<pipeline>/<variant>/<timestamp>
+    # metrics + feature-group ablations; writes evaluation.json into the run dir.
+
+make plots RUNS="runs/.../<ts> [more...]" [SAVE=1] [BARS=1] [NOISE=0.005]
+    # one run: curves + per-command MSE + ablation panels; several: comparison.
+    # SAVE=1: write the PNG into figures/ (named after the runs) instead of a window.
+    # BARS=1: several runs as best-val_loss bars instead of overlaid curves.
+    # NOISE: seed-noise threshold line on the bar charts (0 = none).
+
+make plots-orders [CONFIG=gps_cfc] [STAMP=prefix] [SAVE=1] [NOISE=0.005]
+    # bars of the channel-order sweep of CONFIG (latest run per order).
+    # STAMP: timestamp prefix selecting one sweep session (e.g. STAMP=20260716).
+
+make experiment-order [CONFIG=gps_cfc]        # train one run per channel order, rank by val_loss
+make experiment-convergence [CONFIG=gps_cfc]  # same config under experiments.seeds (stability)
+
 make quadrotor-train     # train the quadrotor baseline
-make clean               # remove runs/, logs, caches
+make clean               # remove runs/, logs, caches (figures/ is kept)
 ```
 
-Override the interpreter elsewhere: `make train PYTHON=python`.
+Every target also accepts `PYTHON=...` to override the auto-detected
+interpreter (e.g. `make train PYTHON=python`).
 
 ## Batch / cluster usage (HPC)
 
@@ -119,8 +140,8 @@ python -m boeing_landing.train --config boeing_landing/configs/gps_cfc.yaml
 Notes for GPU nodes: install the CUDA torch build, then set `accelerator: gpu`,
 `precision: 16-mixed` and raise `dataloader.num_workers` in the config. Compute
 nodes are headless: use `make plots ... SAVE=1` / `--save` (never bare `--plot`).
-Runs land in `runs/<name>/<timestamp>/` — safe on a shared filesystem, no two
-jobs write to the same folder.
+Runs land in `runs/<pipeline>/<variant>/<timestamp>/` — safe on a shared
+filesystem, no two jobs write to the same folder.
 
 ## Config
 
@@ -160,16 +181,22 @@ is already in place, so no code change is needed on a GPU machine.
 
 ## Outputs
 
-One folder per run, never shared or overwritten:
+One folder per run, grouped by pipeline (the yaml), never shared or overwritten.
+`<variant>` is the channel order, prefixed by the seed for convergence runs
+(e.g. `grouped`, `gps_last`, `seed43_grouped`):
 
 ```
-runs/<pipeline>_<order>/<timestamp>/
+runs/<pipeline>/<variant>/<timestamp>/
   epoch=NN_val_loss=0.xxxxxx.ckpt   best checkpoint
   config.yaml                        exact resolved config
   summary.json                       best epoch/val_loss, wall time, n parameters
   evaluation.json                    regression metrics + ablations (make evaluate)
   lightning_logs/                    per-step metrics: losses, grad_norm, epoch time
 ```
+
+Saved plots never go into the run folders: `make plots ... SAVE=1` writes them
+all to the flat `figures/` folder, named `<pipeline>_<variant>_<timestamp>.png`
+(comparisons: `<pipelines>_comparison_<date>.png` / `..._bars_...`).
 
 ## Contributing
 

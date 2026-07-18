@@ -11,5 +11,6 @@ rapport_dataset*/
 .venv/
 lightning_logs/
 runs/
+figures/
 DOC_*.md
 GUIDE_*.md

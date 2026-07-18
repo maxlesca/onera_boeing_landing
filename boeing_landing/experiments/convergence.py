@@ -23,10 +23,11 @@ from utils.config import load_yaml
 
 
 def _with_seed(config: dict, seed: int) -> dict:
-    """Copy of the config with this seed, tagged so run dirs stay separate."""
+    """Copy of the config with this seed, tagged so run dirs stay separate
+    (runs/<pipeline>/seed<seed>_<order>/) while staying under the pipeline."""
     out = deepcopy(config)
     out["training"]["seed"] = seed
-    out["checkpoint_name"] = f"{out.get('checkpoint_name') or 'run'}_seed{seed}"
+    out["run_tag"] = f"seed{seed}"
     return out
 
 

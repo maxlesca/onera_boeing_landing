@@ -88,13 +88,17 @@ def _inject_labels(config: dict) -> None:
 
 
 def _run_dir(project_root: Path, config: dict) -> Path:
-    """One folder per run: runs/<name>_<order>/<timestamp>/ -- never shared,
-    never overwritten across pipelines/iterations."""
+    """One folder per run: runs/<pipeline>/<variant>/<timestamp>/ -- one
+    subfolder per pipeline yaml (checkpoint_name), one per variant inside it
+    (input order, optionally prefixed by a run_tag such as seed43). Never
+    shared, never overwritten across pipelines/iterations."""
     base = config.get("checkpoint_name") or "run"
     order = config["dataset"].get("input_order", "grouped")
+    tag = config.get("run_tag")
+    variant = f"{tag}_{order}" if tag else order
     # microseconds: parallel jobs (e.g. a SLURM array) must never share a dir
     stamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
-    return ensure_dir(project_root / "runs" / f"{base}_{order}" / stamp)
+    return ensure_dir(project_root / "runs" / base / variant / stamp)
 
 
 def assemble(config: dict):

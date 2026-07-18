@@ -1,18 +1,20 @@
 # -*- coding: utf-8 -*-
 """Plot training curves for one run, or compare several runs.
 
-    python -m boeing_landing.report --runs runs/<name>/<timestamp> [more runs...]
+    python -m boeing_landing.report --runs runs/<pipeline>/<variant>/<timestamp> [more runs...]
 
 One run  -> its train/val loss curves, plus the feature-group ablation bars
             when the run has an evaluation.json (make evaluate).
 Several  -> their val_loss curves overlaid for comparison.
---save writes a PNG next to the (first) run instead of opening a window.
+--save writes a PNG into figures/ (one flat folder, named after the runs)
+instead of opening a window.
 """
 
 from __future__ import annotations
 
 import argparse
 import json
+from datetime import datetime
 from pathlib import Path
 
 import matplotlib.pyplot as plt
@@ -29,8 +31,13 @@ def _metrics_frame(run_dir: Path) -> pd.DataFrame:
 
 
 def _run_label(run_dir: Path) -> str:
-    """Readable legend label: <pipeline_order>/<timestamp>."""
-    return f"{run_dir.parent.name}/{run_dir.name}"
+    """Readable legend label: <pipeline>/<variant>/<timestamp>."""
+    return "/".join(run_dir.parts[-3:])
+
+
+def _variant_label(run_dir: Path) -> str:
+    """<pipeline>/<variant> -- identifies a run without its timestamp."""
+    return f"{run_dir.parent.parent.name}/{run_dir.parent.name}"
 
 
 def _mean_predictor_mse(run_dir: Path) -> tuple[list[str], np.ndarray] | None:
@@ -149,7 +156,7 @@ def _order_run_dirs(config_path: Path, stamp: str | None = None) -> list[Path]:
     base = load_yaml(config_path).get("checkpoint_name") or "run"
     found = []
     for order in FEATURE_ORDERS:
-        stamps = sorted((PROJECT_ROOT / "runs" / f"{base}_{order}").glob(f"{stamp or ''}*"))
+        stamps = sorted((PROJECT_ROOT / "runs" / base / order).glob(f"{stamp or ''}*"))
         if stamps:
             found.append(stamps[-1])
     if not found:
@@ -166,7 +173,7 @@ def _best_val_loss(run_dir: Path) -> float:
 def plot_best_bars(run_dirs: list[Path], ax, noise: float = 0.0) -> None:
     """Sweep comparison: best val_loss of each run as sorted bars.
     Bars left of the `best + noise` line are indistinguishable from the best."""
-    scores = {d.parent.name: _best_val_loss(d) for d in run_dirs}
+    scores = {_variant_label(d): _best_val_loss(d) for d in run_dirs}
     names = sorted(scores, key=scores.get, reverse=True)
     ax.barh(names, [scores[n] for n in names])
     if noise > 0:
@@ -177,6 +184,21 @@ def plot_best_bars(run_dirs: list[Path], ax, noise: float = 0.0) -> None:
     ax.set_xlabel("best val_loss")
     ax.set_title("sweep comparison")
     ax.grid(True, axis="x", alpha=0.3)
+
+
+def _figure_path(run_dirs: list[Path], bars: bool) -> Path:
+    """Saved PNGs all go to one flat figures/ folder at the repo root, named
+    after what they show -- easy to browse, never buried inside the run dirs."""
+    from boeing_landing.train import PROJECT_ROOT
+    from utils.config import ensure_dir
+
+    if len(run_dirs) == 1:
+        name = "_".join(run_dirs[0].parts[-3:])  # pipeline_variant_timestamp
+    else:
+        kind = "bars" if bars else "comparison"
+        pipelines = sorted({d.parent.parent.name for d in run_dirs})
+        name = f"{'_'.join(pipelines)}_{kind}_{datetime.now():%Y%m%d_%H%M%S}"
+    return ensure_dir(PROJECT_ROOT / "figures") / f"{name}.png"
 
 
 def _style_loss_ax(ax) -> None:
@@ -237,7 +259,7 @@ def main() -> None:
     fig.tight_layout()
 
     if a.save:
-        out = a.runs[0] / "report.png"
+        out = _figure_path(a.runs, a.bars)
         fig.savefig(out, dpi=120)
         print(f"saved -> {out}")
     else:
