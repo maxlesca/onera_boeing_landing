@@ -14,6 +14,8 @@ requirements.txt          dependencies (venv or conda)
 environment.yml           conda env (reads requirements.txt)
 boeing_landing/           project code
   data/build_dataset.py     CSV -> npz (GPS in, ILS out, per-run split)
+  data/augment_ned.py       raw CSV + NavDB -> new CSV with runway-frame columns
+  data/plot_runway_frame.py approach trajectories of an augmented CSV (3 panels)
   data/features.py          input/label lists + channel orders for the conv
   data/loader.py            npz -> fixed-length portions -> training tensors
   configs/gps_cfc.yaml      one pipeline = one config (single control panel)
@@ -79,6 +81,14 @@ accepts (`OPT=value`); options in brackets are optional and show their default.
 make dataset CSV=path/to.csv [CONFIG=gps_cfc]
     # build the npz from the CSV. CSV: source file (machine-specific).
     # CONFIG: pipeline whose build: section decides val runs / out dir / extra inputs.
+
+make augment [RAW_CSV=datasets/ldg_dataset_images.csv] [NAVDB=datasets/NavDB_MFS.json] [NED_CSV=...]
+    # write NED_CSV = RAW_CSV + 7 runway-frame columns (poi_*, pos_along/cross/up).
+    # The sources are read-only; runways missing from the NavDB keep NaN.
+
+make trajectories [NED_CSV=datasets/ldg_dataset_images_ned.csv] [SAVE=1]
+    # plot the approaches of an augmented csv: top view, vertical profile, and
+    # pos_cross vs the sim localizer (expected y = x). SAVE=1 -> figures/dataset/.
 
 make train [CONFIG=gps_cfc] [ORDER=grouped] [EPOCHS=n]
     # CONFIG: pipeline name (gps_cfc, with or without .yaml) or path to a yaml.

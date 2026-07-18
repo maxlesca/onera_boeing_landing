@@ -27,6 +27,17 @@ deps:  ## install dependencies into the detected interpreter
 dataset:  ## build the npz from the CSV (val runs / out dir come from the config)
 	$(PYTHON) -m boeing_landing.data.build_dataset $(CSV) --config $(CFGPATH)
 
+# runway-frame augmentation (sources are read-only, output is a new csv)
+RAW_CSV ?= datasets/ldg_dataset_images.csv
+NAVDB   ?= datasets/NavDB_MFS.json
+NED_CSV ?= datasets/ldg_dataset_images_ned.csv
+
+augment:  ## add runway-frame columns to the raw csv: make augment [RAW_CSV=...] [NAVDB=...]
+	$(PYTHON) -m boeing_landing.data.augment_ned $(RAW_CSV) $(NAVDB) -o $(NED_CSV)
+
+trajectories:  ## plot the approaches of the augmented csv: make trajectories [NED_CSV=...] [SAVE=1]
+	$(PYTHON) -m boeing_landing.data.plot_runway_frame $(NED_CSV) $(if $(SAVE),--save)
+
 train:  ## train a pipeline: make train CONFIG=gps_cfc ORDER=grouped (EPOCHS=3 for a quick trial)
 	$(PYTHON) -m boeing_landing.train --config $(CFGPATH) --input-order $(ORDER) $(if $(EPOCHS),--max-epochs $(EPOCHS))
 

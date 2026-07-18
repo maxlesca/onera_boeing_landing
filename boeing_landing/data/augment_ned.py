@@ -10,15 +10,18 @@ writes a NEW csv -- the inputs are never modified -- with 7 extra columns:
                                                 representation), the new origin
     poi_course                                  true course of the approach at
                                                 the LTP/FTP (rad, from north)
-    pos_along, pos_cross, pos_down              aircraft position in the runway
+    pos_along, pos_cross, pos_up                aircraft position in the runway
                                                 frame at that origin (m)
 
 The runway frame makes every approach look the same wherever the runway is on
-Earth and whichever QFU is flown: `along` points down the runway in the
-LANDING direction (negative on final, 0 at the threshold), `cross` points to
-the RIGHT of that direction, `down` completes the right-handed triad. It is
-the local NED frame at the LTP/FTP rotated around Down by the approach course
-(bearing LTP -> FPAP, the alignment point of the FAS data block).
+Earth and whichever QFU is flown, and its signs match the ILS deviations of
+the dataset: `along` points down the runway in the LANDING direction
+(negative on final, 0 at the threshold), `cross` points to the LEFT of that
+direction (same sign as localizer_error_m, checked corr ~ +1), `up` points up
+(same sign as the above-glide deviation, glideslope_error_m, corr ~ +1). The
+triad is right-handed. It is the local NED frame at the LTP/FTP rotated
+around Down by the approach course (bearing LTP -> FPAP, the alignment point
+of the FAS data block), with the lateral and vertical axes mirrored.
 
 The LTP/FTP (Landing Threshold Point / Fictitious Threshold Point) is the
 threshold point of the approach itself: every QFU has its own entry in the
@@ -48,7 +51,7 @@ _F = 1 / 298.257223563
 _E2 = _F * (2 - _F)
 
 POI_COLUMNS = ["poi_latitude", "poi_longitude", "poi_altitude", "poi_course"]
-POS_COLUMNS = ["pos_along", "pos_cross", "pos_down"]
+POS_COLUMNS = ["pos_along", "pos_cross", "pos_up"]
 
 
 def geodetic_to_ecef(lat: np.ndarray, lon: np.ndarray, h: np.ndarray) -> np.ndarray:
@@ -97,9 +100,12 @@ def approach_course(entry: dict) -> float:
 
 
 def _course_spin(course: float) -> np.ndarray:
-    """Rotation around Down aligning North with the approach course."""
+    """NED -> (along, left, up): rotation around Down by the approach course,
+    then lateral and vertical axes mirrored to match the ILS deviation signs
+    (cross positive LEFT like localizer_error_m, up positive like
+    glideslope_error_m). Determinant +1: still right-handed."""
     c, s = np.cos(course), np.sin(course)
-    return np.array([[c, s, 0.0], [-s, c, 0.0], [0.0, 0.0, 1.0]])
+    return np.array([[c, s, 0.0], [s, -c, 0.0], [0.0, 0.0, -1.0]])
 
 
 def runway_frame(entry: dict) -> tuple[np.ndarray, np.ndarray]:
