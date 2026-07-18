@@ -4,7 +4,7 @@
 
 | Piece | Responsibility |
 |---|---|
-| `boeing_landing/pipelines/<name>/` | everything tunable — one folder = one pipeline: `base.yaml` + training variants (`extends: base.yaml`) |
+| `boeing_landing/pipelines/<name>/` | one folder = one pipeline: `base.yaml` + training variants (`extends: base.yaml`) + the code ONLY that pipeline uses (e.g. `runway_frame/augment_ned.py`) + a short README |
 | `boeing_landing/data/build_dataset.py` | raw CSV -> npz (columns, split, normalisation) |
 | `boeing_landing/data/features.py` | which columns are inputs/labels + conv channel orders |
 | `boeing_landing/data/loader.py` | npz -> fixed-length portions -> training tensors |
@@ -26,6 +26,16 @@ Different model, channel order, window length… no code needed:
 
 Training, evaluation (`make evaluate`), plots (`make plots`) and experiments
 are config-driven and work on any run directory unchanged.
+
+**Where pipeline code goes.** To read one pipeline, open its folder: it holds
+its configs AND its specific code (e.g. the image pipeline's YOLO/embedding
+step), with a short README pointing at the engine pieces it reuses. The rule
+mirrors the utils/ one, one level down:
+
+- used by ONE pipeline  -> `pipelines/<name>/*.py`
+- used by ≥ 2 pipelines -> the engine (`data/`, `train.py`, …); promote it
+  the day a second pipeline needs it — never copy it
+- used by boeing AND quadrotor -> `utils/`
 
 ## Adding a training variant of an existing pipeline
 

@@ -14,14 +14,12 @@ requirements.txt          dependencies (venv or conda)
 environment.yml           conda env (reads requirements.txt)
 boeing_landing/           project code
   data/build_dataset.py     CSV -> npz (GPS in, ILS out, per-run split)
-  data/augment_ned.py       raw CSV + NavDB -> new CSV with runway-frame columns
-  data/plot_runway_frame.py approach trajectories of an augmented CSV (3 panels)
   data/features.py          input/label lists + channel orders for the conv
   data/loader.py            npz -> fixed-length portions -> training tensors
   config.py                 pipeline config loading (extends inheritance)
-  pipelines/gps_cfc/        one folder per pipeline: base.yaml + variants
-    base.yaml                 the pipeline's single control panel
-    quick.yaml, long.yaml     training variants (extends: base.yaml, only overrides)
+  pipelines/                one folder per pipeline: configs + pipeline-specific code
+    gps_cfc/                  base.yaml + quick/long variants (extends), README
+    runway_frame/             augment_ned.py (GPS -> runway frame), plot_runway_frame.py
   experiments/feature_order.py   sweep conv channel orders
   experiments/convergence.py     seed-stability study
   train.py                  assemble + fit_and_save (generic, config-driven)
