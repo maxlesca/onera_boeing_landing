@@ -1,0 +1,7 @@
+# Long-training variant of gps_cfc: more epochs, stops when val_loss stalls.
+# Runs land in runs/gps_cfc/long_<order>/ (the variant name tags the run).
+extends: base.yaml
+
+training:
+  max_epochs: 60
+  early_stopping_patience: 5

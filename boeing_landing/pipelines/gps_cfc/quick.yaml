@@ -1,0 +1,6 @@
+# Quick smoke variant of gps_cfc: 3 epochs to check the chain end to end.
+# Runs land in runs/gps_cfc/quick_<order>/ (the variant name tags the run).
+extends: base.yaml
+
+training:
+  max_epochs: 3

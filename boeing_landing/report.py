@@ -149,11 +149,11 @@ def plot_ablation(run_dir: Path, ax, noise: float = 0.0) -> None:
 def _order_run_dirs(config_path: Path, stamp: str | None = None) -> list[Path]:
     """One run dir per conv-order sweep entry of the given pipeline config:
     the latest, or the latest whose timestamp starts with `stamp`."""
+    from boeing_landing.config import load_config
     from boeing_landing.data.features import FEATURE_ORDERS
     from boeing_landing.train import PROJECT_ROOT
-    from utils.config import load_yaml
 
-    base = load_yaml(config_path).get("checkpoint_name") or "run"
+    base = load_config(config_path).get("checkpoint_name") or "run"
     found = []
     for order in FEATURE_ORDERS:
         stamps = sorted((PROJECT_ROOT / "runs" / base / order).glob(f"{stamp or ''}*"))

@@ -18,7 +18,10 @@ boeing_landing/           project code
   data/plot_runway_frame.py approach trajectories of an augmented CSV (3 panels)
   data/features.py          input/label lists + channel orders for the conv
   data/loader.py            npz -> fixed-length portions -> training tensors
-  configs/gps_cfc.yaml      one pipeline = one config (single control panel)
+  config.py                 pipeline config loading (extends inheritance)
+  pipelines/gps_cfc/        one folder per pipeline: base.yaml + variants
+    base.yaml                 the pipeline's single control panel
+    quick.yaml, long.yaml     training variants (extends: base.yaml, only overrides)
   experiments/feature_order.py   sweep conv channel orders
   experiments/convergence.py     seed-stability study
   train.py                  assemble + fit_and_save (generic, config-driven)
@@ -91,7 +94,8 @@ make trajectories [NED_CSV=datasets/ldg_dataset_images_ned.csv] [SAVE=1]
     # pos_cross vs the sim localizer (expected y = x). SAVE=1 -> figures/dataset/.
 
 make train [CONFIG=gps_cfc] [ORDER=grouped] [EPOCHS=n]
-    # CONFIG: pipeline name (gps_cfc, with or without .yaml) or path to a yaml.
+    # CONFIG: pipeline name (gps_cfc -> its base.yaml), pipeline/variant
+    #         (gps_cfc/quick, gps_cfc/long) or path to a yaml.
     # ORDER: conv channel order — grouped, gps_first, gps_last, pos_vel, by_axis,
     #        reversed, random_1..3 (see data/features.py).
     # EPOCHS: override training.max_epochs for a quick trial (e.g. EPOCHS=3).
@@ -125,7 +129,7 @@ Every make target wraps a plain `python -m` command, so jobs don't need make:
 
 | make | raw command |
 |---|---|
-| `make dataset CSV=...` | `python -m boeing_landing.data.build_dataset <csv> --config boeing_landing/configs/gps_cfc.yaml` |
+| `make dataset CSV=...` | `python -m boeing_landing.data.build_dataset <csv> --config boeing_landing/pipelines/gps_cfc/base.yaml` |
 | `make train` | `python -m boeing_landing.train --config ... [--input-order X] [--max-epochs N]` |
 | `make evaluate RUN=...` | `python -m boeing_landing.evaluate --run <run_dir>` |
 | `make experiment-*` | `python -m boeing_landing.experiments.<name> --config ...` |
@@ -140,7 +144,7 @@ SLURM example:
 #SBATCH --time=02:00:00
 conda activate boeing_landing
 cd "$SLURM_SUBMIT_DIR"
-python -m boeing_landing.train --config boeing_landing/configs/gps_cfc.yaml
+python -m boeing_landing.train --config boeing_landing/pipelines/gps_cfc/base.yaml
 ```
 
 Notes for GPU nodes: install the CUDA torch build, then set `accelerator: gpu`,
@@ -152,9 +156,13 @@ filesystem, no two jobs write to the same folder.
 ## Config
 
 Model hyperparameters live in
-[boeing_landing/configs/gps_cfc.yaml](boeing_landing/configs/gps_cfc.yaml).
+[boeing_landing/pipelines/gps_cfc/base.yaml](boeing_landing/pipelines/gps_cfc/base.yaml).
 The config is the single control panel: model, data, build, evaluation, and
-experiment settings all live there.
+experiment settings all live there. Each pipeline is a folder under
+`boeing_landing/pipelines/`; training variants are extra yamls in the same
+folder that declare `extends: base.yaml` and override only the knobs they
+change (no duplication). A variant's runs are tagged with its name:
+`runs/<pipeline>/<variant>_<order>/`.
 Data knobs:
 
 | Key | Meaning |

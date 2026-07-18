@@ -108,8 +108,8 @@ def build(source: Path, val_runs: set[int], out_dir: Path,
 
 
 def main() -> None:
+    from boeing_landing.config import load_config
     from boeing_landing.train import DEFAULT_CONFIG
-    from utils.config import load_yaml
 
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("source", type=Path, help="dataset .zip or extracted .csv")
@@ -117,7 +117,7 @@ def main() -> None:
                     help="pipeline config holding the build: section")
     a = ap.parse_args()
 
-    build_cfg = load_yaml(a.config).get("build", {})
+    build_cfg = load_config(a.config).get("build", {})
     val_runs = {int(r) for r in build_cfg.get("val_runs", [8])}
     build(a.source, val_runs, Path(build_cfg.get("out_dir", "datasets/gps_no_ils")),
           extra_columns=build_cfg.get("extra_columns") or [])

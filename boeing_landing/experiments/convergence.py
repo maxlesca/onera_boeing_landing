@@ -17,23 +17,23 @@ import statistics
 from copy import deepcopy
 from pathlib import Path
 
+from boeing_landing.config import load_pipeline_config
 from boeing_landing.train import (DEFAULT_CONFIG, PROJECT_ROOT, train_config,
                                   val_loss_from_checkpoint)
-from utils.config import load_yaml
 
 
 def _with_seed(config: dict, seed: int) -> dict:
     """Copy of the config with this seed, tagged so run dirs stay separate
-    (runs/<pipeline>/seed<seed>_<order>/) while staying under the pipeline."""
+    (runs/<pipeline>/[<variant>_]seed<seed>_<order>/)."""
     out = deepcopy(config)
     out["training"]["seed"] = seed
-    out["run_tag"] = f"seed{seed}"
+    out["run_tag"] = "_".join(filter(None, [out.get("run_tag"), f"seed{seed}"]))
     return out
 
 
 def sweep(config_path: Path, project_root: Path) -> dict[int, tuple[float, Path]]:
     """Train once per seed; return {seed: (best val_loss, run dir)}."""
-    base = load_yaml(config_path)
+    base = load_pipeline_config(config_path)
     results = {}
     for seed in base.get("experiments", {}).get("seeds", [42, 43, 44]):
         print(f"\n=== seed {seed} ===")

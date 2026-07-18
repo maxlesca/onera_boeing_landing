@@ -5,7 +5,7 @@ Reuses the shared building blocks (build_controller_network, Lightning_Model,
 transform_to_sequence, DatasetController) unchanged; only the data source is
 landing-specific (boeing_landing.data.loader). Run from the repo root:
 
-    python -m boeing_landing.train --config boeing_landing/configs/gps_cfc.yaml
+    python -m boeing_landing.train --config boeing_landing/pipelines/gps_cfc/base.yaml
 """
 
 from __future__ import annotations
@@ -25,15 +25,18 @@ from lightning.pytorch.callbacks import EarlyStopping, ModelCheckpoint
 from boeing_landing.data.features import (CANONICAL_INPUTS, FEATURE_ORDERS, LABELS,
                                           extend_order)
 from boeing_landing.data.loader import load_portions
-from utils.config import ensure_dir, load_yaml, save_yaml
+from boeing_landing.config import load_pipeline_config
+from utils.config import ensure_dir, save_yaml
 from utils.data import DatasetController, transform_to_sequence
 from utils.lightning import Lightning_Model
 from utils.model_builder import build_controller_network
 
 # Single source for the repo root and the default pipeline config; every
 # entrypoint (train, experiments, build) imports these instead of hardcoding.
+# Pipelines live in boeing_landing/pipelines/<name>/: base.yaml + variants
+# that `extends` it, overriding only the knobs they change.
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
-DEFAULT_CONFIG = PROJECT_ROOT / "boeing_landing" / "configs" / "gps_cfc.yaml"
+DEFAULT_CONFIG = PROJECT_ROOT / "boeing_landing" / "pipelines" / "gps_cfc" / "base.yaml"
 
 
 def _resolve_order(dataset_cfg: dict) -> list[str]:
@@ -199,7 +202,7 @@ def train_config(config: dict, project_root: Path) -> Path:
 def train(config_path: Path, project_root: Path = PROJECT_ROOT,
           input_order: str | None = None, max_epochs: int | None = None) -> Path:
     """Same from a YAML path, with optional launch-time overrides."""
-    config = load_yaml(config_path)
+    config = load_pipeline_config(config_path)
     if input_order:
         config["dataset"]["input_order"] = input_order
     if max_epochs:
