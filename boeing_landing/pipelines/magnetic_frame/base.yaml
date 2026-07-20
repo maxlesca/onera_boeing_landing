@@ -1,0 +1,96 @@
+# magnetic_frame pipeline: inertial + magnetic-north position -> Conv1D -> CfC.
+# Twin of runway_frame with one change: the same GPS position is converted into a
+# NED frame aligned with MAGNETIC north (pos_north_mag/east_mag/up, from
+# augment_magnetic.py) instead of the runway/ILS axis. Same GPS-derived position
+# either way -- only the frame azimuth differs. The magnetic axis is the one an
+# onboard magnetometer defines, where the runway axis comes from the ILS localiser
+# (ground infrastructure); comparing the two isolates the effect of that choice.
+# Feed it the augmented csv:  make dataset CSV=datasets/ldg_dataset_images_mag.csv CONFIG=magnetic_frame
+# Paths are relative to the repo root (run from onera_boeing_landing/).
+
+training:
+  max_epochs: 20
+  lr: 0.001
+  seed: 42
+  logger: false
+  accelerator: auto          # auto | cpu | gpu
+  devices: 1
+  precision: 32              # 32 | 16-mixed (GPU only)
+  gradient_clip_val: 0.0     # >0 clips gradients (RNN stability); 0 = off
+  early_stopping_patience: 0 # >0 stops after N epochs without val improvement; 0 = off
+  log_every_n_steps: 1       # write metrics.csv every n steps; 0 = no logging at all
+
+# csv augmentation step (make augment CONFIG=magnetic_frame). Dispatched by
+# boeing_landing.data.augment: which augmentation to run, and where it writes.
+augment:
+  module: boeing_landing.pipelines.magnetic_frame.augment_magnetic
+  out_csv: datasets/ldg_dataset_images_mag.csv
+
+# npz build step (make dataset). The source CSV stays a CLI arg (machine-specific).
+build:
+  input_set: magnetic        # replace GPS with pos_north_mag/east_mag/up (features.INPUT_SETS)
+  val_runs: [8]              # runs held out for validation
+  out_dir: datasets/magnetic_frame   # inside the repo, gitignored
+
+# run evaluation (make evaluate)
+evaluation:
+  ablation: true             # mask each feature group and re-evaluate
+  fill_value: 0.0            # value written into masked channels
+
+# experiment sweeps
+experiments:
+  seeds: [42, 43, 44]        # convergence study: same config, several inits
+
+dataset:
+  train_npz: datasets/magnetic_frame/landing_train.npz
+  val_npz: datasets/magnetic_frame/landing_val.npz
+  portion_len: 125       # ~5 s at 25 Hz -- the analogue of the quadrotor 200-step trajectory
+  stride: 25             # step between portions (~1 s) -> overlap for augmentation
+  input_order: magnetic  # channel order for the conv (see features.FEATURE_ORDERS)
+  use_dt: true           # per-frame dt -> CfC timespans (conv_cfc baseline recipe)
+  normalized: true
+  with_noise: false
+  with_bias: false
+  with_delay: false
+  delay_steps: 2
+
+mlp_block:
+  value: false
+  no_layers: [64, 128, 128, 256]
+conv_block:
+  value: true
+  output_dim: 256
+
+# seq_len=1 like the baseline: the conv sees one frame at a time (over the
+# feature axis), the CfC carries memory across the portion.
+sequencing:
+  value: true
+  seq_len: 1
+
+dataloader:
+  batch_size: 32
+  num_workers: 0         # Windows: 0 avoids worker spawn issues (baseline used 8)
+  pin_memory: false
+  drop_last: true
+
+model:
+  type: cfc
+  no_neurons_layer: 64
+  ode_unfolds: 6         # LTC only (inert for cfc)
+  cfc_mode: default
+  ncp:                   # NCP only (inert for cfc)
+    inter_neurons: 32
+    command_neurons: 24
+    sensory_fanout: 20
+    inter_fanout: 16
+    recurrent_command_synapses: 16
+    motor_fanin: 20
+  backbone_units: 128
+  backbone_layers: 1
+  backbone_dropout: 0.0
+  activation: lecun_tanh
+  mixed_memory: false
+  scale_factor: 1.0
+  hidden_layers: [120, 120, 120]  # MLP only (inert for cfc)
+
+checkpoint_name: magnetic_cfc
