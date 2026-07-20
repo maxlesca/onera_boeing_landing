@@ -1,0 +1,4 @@
+# Keeps the datasets/ directory in the repo. Its contents (built npz, augmented
+# CSVs, per-pipeline out_dirs) stay gitignored -- see the root .gitignore
+# (datasets/* + !datasets/.gitkeep). Raw source CSVs live here too but are
+# machine-specific and never committed.
