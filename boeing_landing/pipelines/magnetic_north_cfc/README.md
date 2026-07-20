@@ -34,8 +34,8 @@ Geodesy helpers are shared in `boeing_landing/data/geodesy.py` (over **pymap3d**
 only the declination-from-QFU and the spin `_declination_spin` are specific here.
 
 ```bash
-make augment CONFIG=magnetic_north_cfc   # writes the augment.out_csv named in the config
-make dataset CONFIG=magnetic_north_cfc   # reads that same csv back (no CSV= needed)
+make augment CONFIG=magnetic_north_cfc RAW_CSV=datasets/ldg_dataset_images.csv   # raw -> augment.out_csv; RAW_CSV picks the source dataset
+make dataset CONFIG=magnetic_north_cfc   # reads augment.out_csv back, derived (no CSV= needed)
 make train   CONFIG=magnetic_north_cfc ORDER=magnetic_north
 ```
 

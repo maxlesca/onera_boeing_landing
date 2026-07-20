@@ -29,8 +29,8 @@ Geodesy helpers (`geodetic_to_ned`, `approach_course`, …) are shared and live 
 ILS-signed spin `_course_spin` is specific to this pipeline.
 
 ```bash
-make augment CONFIG=ils_aligned_cfc      # writes the augment.out_csv named in the config
-make dataset CONFIG=ils_aligned_cfc      # reads that same csv back (no CSV= needed)
+make augment CONFIG=ils_aligned_cfc RAW_CSV=datasets/ldg_dataset_images.csv   # raw -> augment.out_csv; RAW_CSV picks the source dataset
+make dataset CONFIG=ils_aligned_cfc      # reads augment.out_csv back, derived (no CSV= needed)
 make train   CONFIG=ils_aligned_cfc ORDER=ils_aligned
 make trajectories NED_CSV=datasets/ldg_dataset_images_ned.csv   # SAVE=1 -> figures/dataset/
 ```
