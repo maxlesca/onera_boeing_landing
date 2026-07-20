@@ -46,9 +46,9 @@ POS_MAGNETIC = ["pos_north_mag", "pos_east_mag", "pos_up_mag"]
 # ILS is in none of them (dropped since gps_cfc); the difference is only how the
 # GPS position is expressed.
 INPUT_SETS = {
-    "gps": CANONICAL_INPUTS,        # GPS as absolute lat/lon/alt + inertial (default, gps_cfc)
-    "runway": POS_RUNWAY + INERTIAL,   # GPS converted to runway/ILS-aligned coords + inertial
-    "magnetic": POS_MAGNETIC + INERTIAL,  # GPS converted to magnetic-north coords + inertial
+    "gps": CANONICAL_INPUTS,             # GPS as absolute lat/lon/alt + inertial (default, gps_cfc)
+    "ils_aligned": POS_RUNWAY + INERTIAL,      # GPS converted to runway/ILS-aligned coords + inertial
+    "magnetic_north": POS_MAGNETIC + INERTIAL,  # GPS converted to magnetic-north coords + inertial
 }
 
 # throttle_right mirrors throttle_left exactly in the source data (checked:
@@ -91,9 +91,9 @@ FEATURE_ORDERS = {
     "random_2": random_order(2),
     "random_3": random_order(3),
     # canonical order of each local-frame input set (position block first, then
-    # the inertial core), so the loader can reorder a runway/magnetic npz -- these
-    # npz carry the GPS position as local coords, not absolute lat/lon, so the
-    # lat/lon-based orders above do not apply to them.
-    "runway": INPUT_SETS["runway"],
-    "magnetic": INPUT_SETS["magnetic"],
+    # the inertial core), so the loader can reorder an ils_aligned/magnetic_north
+    # npz -- these npz carry the GPS position as local coords, not absolute
+    # lat/lon, so the lat/lon-based orders above do not apply to them.
+    "ils_aligned": INPUT_SETS["ils_aligned"],
+    "magnetic_north": INPUT_SETS["magnetic_north"],
 }

@@ -1,6 +1,6 @@
-# magnetic_frame — GPS position converted to a magnetic-north NED frame
+# magnetic_north_cfc — GPS position converted to a magnetic-north NED frame
 
-Twin of `runway_frame`, same origin (the runway threshold LTP/FTP) and the same
+Twin of `ils_aligned_cfc`, same origin (the runway threshold LTP/FTP) and the same
 **GPS-derived position** — only the horizontal axes differ: they point to
 **magnetic north** instead of down the runway. Like the runway frame it converts
 the GPS fix out of absolute lat/lon (memorised per airport); GPS is not removed.
@@ -28,15 +28,15 @@ would refine it if the comparison warrants it.
   the LTP/FTP origin + declination (`poi_*`) and the aircraft position in
   magnetic-NED coordinates (`pos_north_mag`, `pos_east_mag`, `pos_up_mag`)
 - `base.yaml` — training config (inertial + magnetic-NED position → Conv1D →
-  CfC); identical to `runway_frame/base.yaml` except the input set
+  CfC); identical to `ils_aligned_cfc/base.yaml` except the input set
 
 Geodesy helpers are shared in `boeing_landing/data/geodesy.py` (over **pymap3d**);
 only the declination-from-QFU and the spin `_declination_spin` are specific here.
 
 ```bash
-make augment CONFIG=magnetic_frame                      # -> ..._mag.csv (path from the config)
-make dataset CSV=datasets/ldg_dataset_images_mag.csv CONFIG=magnetic_frame
-make train   CONFIG=magnetic_frame ORDER=magnetic
+make augment CONFIG=magnetic_north_cfc                  # -> ..._mag.csv (path from the config)
+make dataset CSV=datasets/ldg_dataset_images_mag.csv CONFIG=magnetic_north_cfc
+make train   CONFIG=magnetic_north_cfc ORDER=magnetic_north
 ```
 
 The augmentation to run and its output path come from this pipeline's `augment:`

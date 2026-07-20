@@ -31,7 +31,7 @@ directions -- resolve to different origins and opposite courses.
 Rows whose (airport, runway) is missing from the database keep NaN in the new
 columns and are reported, never dropped.
 
-    python -m boeing_landing.data.augment_ned datasets/ldg_dataset_images.csv \\
+    python -m boeing_landing.pipelines.ils_aligned_cfc.augment_ned datasets/ldg_dataset_images.csv \\
         datasets/NavDB_MFS.json
 """
 

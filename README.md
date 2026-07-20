@@ -19,7 +19,8 @@ boeing_landing/           project code
   config.py                 pipeline config loading (extends inheritance)
   pipelines/                one folder per pipeline: configs + pipeline-specific code
     gps_cfc/                  base.yaml + quick/long variants (extends), README
-    runway_frame/             augment_ned.py (GPS -> runway frame), plot_runway_frame.py
+    ils_aligned_cfc/          GPS -> runway/ILS-aligned NED: augment_ned.py, plot, base.yaml
+    magnetic_north_cfc/       GPS -> magnetic-north NED: augment_magnetic.py, base.yaml
   experiments/feature_order.py   sweep conv channel orders
   experiments/convergence.py     seed-stability study
   train.py                  assemble + fit_and_save (generic, config-driven)

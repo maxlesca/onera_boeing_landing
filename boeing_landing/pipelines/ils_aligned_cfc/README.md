@@ -1,4 +1,4 @@
-# runway_frame — GPS position converted to the runway's frame (ILS-aligned)
+# ils_aligned_cfc — GPS position converted to the runway/ILS-aligned frame
 
 **Converts** the GPS position from absolute lat/lon/alt (which the network was
 memorising per airport) into coordinates **at the runway threshold, along the
@@ -12,7 +12,7 @@ signs match the ILS deviations: `pos_cross` is positive LEFT like
 `localizer_error_m`, `pos_up` positive like `glideslope_error_m`.
 
 Its axis direction is the runway course (the ILS localiser bearing) — that axis
-is the one thing the twin `magnetic_frame` pipeline swaps for magnetic north.
+is the one thing the twin `magnetic_north_cfc` pipeline swaps for magnetic north.
 
 ## Files
 
@@ -29,10 +29,10 @@ Geodesy helpers (`geodetic_to_ned`, `approach_course`, …) are shared and live 
 ILS-signed spin `_course_spin` is specific to this pipeline.
 
 ```bash
-make augment CONFIG=runway_frame                        # -> ..._ned.csv (path from the config)
+make augment CONFIG=ils_aligned_cfc                     # -> ..._ned.csv (path from the config)
 make trajectories NED_CSV=datasets/ldg_dataset_images_ned.csv   # SAVE=1 -> figures/dataset/
-make dataset CSV=datasets/ldg_dataset_images_ned.csv CONFIG=runway_frame
-make train   CONFIG=runway_frame ORDER=runway
+make dataset CSV=datasets/ldg_dataset_images_ned.csv CONFIG=ils_aligned_cfc
+make train   CONFIG=ils_aligned_cfc ORDER=ils_aligned
 ```
 
 The augmentation to run and its output path come from this pipeline's `augment:`

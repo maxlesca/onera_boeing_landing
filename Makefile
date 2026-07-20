@@ -31,16 +31,16 @@ dataset:  ## build the npz from the CSV (val runs / out dir come from the config
 
 # csv augmentation (sources are read-only). The augmentation to run and where it
 # writes come from the pipeline's `augment:` config, so one target serves every
-# frame: make augment CONFIG=runway_frame  /  CONFIG=magnetic_frame.
+# frame: make augment CONFIG=ils_aligned_cfc  /  CONFIG=magnetic_north_cfc.
 RAW_CSV ?= datasets/ldg_dataset_images.csv
 NAVDB   ?= datasets/NavDB_MFS.json
 NED_CSV ?= datasets/ldg_dataset_images_ned.csv
 
-augment:  ## augment the raw csv the way CONFIG says: make augment CONFIG=runway_frame [RAW_CSV=...]
+augment:  ## augment the raw csv the way CONFIG says: make augment CONFIG=ils_aligned_cfc [RAW_CSV=...]
 	$(PYTHON) -m boeing_landing.data.augment $(RAW_CSV) $(NAVDB) --config $(CFGPATH)
 
 trajectories:  ## plot the approaches of the augmented csv: make trajectories [NED_CSV=...] [SAVE=1]
-	$(PYTHON) -m boeing_landing.pipelines.runway_frame.plot_runway_frame $(NED_CSV) $(if $(SAVE),--save)
+	$(PYTHON) -m boeing_landing.pipelines.ils_aligned_cfc.plot_runway_frame $(NED_CSV) $(if $(SAVE),--save)
 
 train:  ## train a pipeline: make train CONFIG=gps_cfc ORDER=grouped (EPOCHS=3 for a quick trial)
 	$(PYTHON) -m boeing_landing.train --config $(CFGPATH) --input-order $(ORDER) $(if $(EPOCHS),--max-epochs $(EPOCHS))

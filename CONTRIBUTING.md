@@ -4,7 +4,7 @@
 
 | Piece | Responsibility |
 |---|---|
-| `boeing_landing/pipelines/<name>/` | one folder = one pipeline: `base.yaml` + training variants (`extends: base.yaml`) + the code ONLY that pipeline uses (e.g. `runway_frame/augment_ned.py`) + a short README |
+| `boeing_landing/pipelines/<name>/` | one folder = one pipeline: `base.yaml` + training variants (`extends: base.yaml`) + the code ONLY that pipeline uses (e.g. `ils_aligned_cfc/augment_ned.py`) + a short README |
 | `boeing_landing/data/build_dataset.py` | raw CSV -> npz (columns, split, normalisation) |
 | `boeing_landing/data/features.py` | which columns are inputs/labels + conv channel orders |
 | `boeing_landing/data/loader.py` | npz -> fixed-length portions -> training tensors |

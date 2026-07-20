@@ -7,7 +7,7 @@ cross-check of pos_cross against the sim's own localizer_error_m -- the two
 measure the same physical quantity through independent paths, so the cloud
 must sit on y = x (both count positive LEFT of the centerline).
 
-    python -m boeing_landing.data.plot_runway_frame datasets/ldg_dataset_images_ned.csv [--save]
+    python -m boeing_landing.pipelines.ils_aligned_cfc.plot_runway_frame datasets/ldg_dataset_images_ned.csv [--save]
 """
 
 from __future__ import annotations

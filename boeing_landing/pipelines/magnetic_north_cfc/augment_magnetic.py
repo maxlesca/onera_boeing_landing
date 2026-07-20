@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """Augment a landing CSV with magnetic-north NED coordinates of the aircraft.
 
-Sibling of the runway-frame augmentation: same geodetic chain, the same origin
+Sibling of the ILS-aligned augmentation (ils_aligned_cfc/augment_ned.py): same geodetic chain, the same origin
 (the runway threshold LTP/FTP) and the same GPS-derived position -- only the
 horizontal axes differ, pointing to MAGNETIC north instead of down the runway.
 The runway frame's axis comes from the ILS localiser (a ground installation); the
@@ -31,7 +31,7 @@ comparison warrants it.
 Rows whose (airport, runway) is missing from the database keep NaN in the new
 columns and are reported, never dropped.
 
-    python -m boeing_landing.pipelines.magnetic_frame.augment_magnetic \\
+    python -m boeing_landing.pipelines.magnetic_north_cfc.augment_magnetic \\
         datasets/ldg_dataset_images.csv datasets/NavDB_MFS.json
 """
 

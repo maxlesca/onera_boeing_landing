@@ -1,10 +1,10 @@
-# runway_frame pipeline: inertial + runway/ILS-aligned position -> Conv1D -> CfC.
+# ils_aligned_cfc pipeline: inertial + ILS/runway-aligned position -> Conv1D -> CfC.
 # Same engine and hyperparameters as gps_cfc; the only change is the input set --
 # the GPS position is CONVERTED from absolute lat/lon/alt into runway-frame coords
 # (pos_along/cross/up, from augment_ned.py). GPS is not removed, only re-expressed,
 # so the network sees along-runway and cross-track offsets instead of the absolute
 # coordinate it was memorising. ILS stays out (as in gps_cfc).
-# Feed it the augmented csv:  make dataset CSV=datasets/ldg_dataset_images_ned.csv CONFIG=runway_frame
+# Feed it the augmented csv:  make dataset CSV=datasets/ldg_dataset_images_ned.csv CONFIG=ils_aligned_cfc
 # Paths are relative to the repo root (run from onera_boeing_landing/).
 
 training:
@@ -19,17 +19,17 @@ training:
   early_stopping_patience: 0 # >0 stops after N epochs without val improvement; 0 = off
   log_every_n_steps: 1       # write metrics.csv every n steps; 0 = no logging at all
 
-# csv augmentation step (make augment CONFIG=runway_frame). Dispatched by
+# csv augmentation step (make augment CONFIG=ils_aligned_cfc). Dispatched by
 # boeing_landing.data.augment: which augmentation to run, and where it writes.
 augment:
-  module: boeing_landing.pipelines.runway_frame.augment_ned
+  module: boeing_landing.pipelines.ils_aligned_cfc.augment_ned
   out_csv: datasets/ldg_dataset_images_ned.csv
 
 # npz build step (make dataset). The source CSV stays a CLI arg (machine-specific).
 build:
-  input_set: runway          # replace GPS with pos_along/cross/up (features.INPUT_SETS)
+  input_set: ils_aligned     # replace GPS with pos_along/cross/up (features.INPUT_SETS)
   val_runs: [8]              # runs held out for validation
-  out_dir: datasets/runway_frame   # inside the repo, gitignored
+  out_dir: datasets/ils_aligned_cfc   # inside the repo, gitignored
 
 # run evaluation (make evaluate)
 evaluation:
@@ -41,11 +41,11 @@ experiments:
   seeds: [42, 43, 44]        # convergence study: same config, several inits
 
 dataset:
-  train_npz: datasets/runway_frame/landing_train.npz
-  val_npz: datasets/runway_frame/landing_val.npz
-  portion_len: 125       # ~5 s at 25 Hz -- the analogue of the quadrotor 200-step trajectory
-  stride: 25             # step between portions (~1 s) -> overlap for augmentation
-  input_order: runway    # channel order for the conv (see features.FEATURE_ORDERS)
+  train_npz: datasets/ils_aligned_cfc/landing_train.npz
+  val_npz: datasets/ils_aligned_cfc/landing_val.npz
+  portion_len: 125         # ~5 s at 25 Hz -- the analogue of the quadrotor 200-step trajectory
+  stride: 25               # step between portions (~1 s) -> overlap for augmentation
+  input_order: ils_aligned # channel order for the conv (see features.FEATURE_ORDERS)
   use_dt: true           # per-frame dt -> CfC timespans (conv_cfc baseline recipe)
   normalized: true
   with_noise: false
@@ -92,4 +92,4 @@ model:
   scale_factor: 1.0
   hidden_layers: [120, 120, 120]  # MLP only (inert for cfc)
 
-checkpoint_name: runway_cfc
+checkpoint_name: ils_aligned_cfc
