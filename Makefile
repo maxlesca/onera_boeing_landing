@@ -3,7 +3,7 @@
 # from WSL via interop), then the active environment's `python` (e.g. conda).
 # Still overridable:  make train PYTHON=/path/to/python
 PYTHON  ?= $(if $(wildcard .venv/bin/python),.venv/bin/python,$(if $(wildcard .venv/Scripts/python.exe),.venv/Scripts/python.exe,python))
-CSV     ?= ../datasets/dataset_sans_barres/ldg_dataset_images_Maxime.csv
+CSV     ?=
 CONFIG  ?= gps_cfc
 ORDER   ?= grouped
 # CONFIG accepts: a pipeline name (gps_cfc -> pipelines/gps_cfc/base.yaml),
@@ -26,7 +26,7 @@ install:  ## create .venv and install dependencies
 deps:  ## install dependencies into the detected interpreter
 	$(PYTHON) -m pip install -r requirements.txt
 
-dataset:  ## build the npz from the CSV (val runs / out dir come from the config)
+dataset:  ## build the npz: make dataset CONFIG=ils_aligned_cfc (frame pipelines read augment.out_csv; add CSV=... to override, required for gps_cfc)
 	$(PYTHON) -m boeing_landing.data.build_dataset $(CSV) --config $(CFGPATH)
 
 # csv augmentation (sources are read-only). The augmentation to run and where it

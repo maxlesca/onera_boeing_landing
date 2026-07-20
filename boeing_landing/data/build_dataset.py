@@ -12,8 +12,10 @@ random split would leak the validation set into training.
 Val runs and output dir come from the pipeline config (`build:` section).
 
 Usage:
-    python -m boeing_landing.data.build_dataset SOURCE [--config path.yaml]
-    SOURCE = the dataset .zip or the extracted ';'-separated .csv.
+    python -m boeing_landing.data.build_dataset [SOURCE] [--config path.yaml]
+    SOURCE = the dataset .zip or the extracted ';'-separated .csv. Optional: if
+    omitted, it defaults to the config's `augment.out_csv` (the augmented csv a
+    frame pipeline just wrote), so those pipelines need no source given.
 """
 
 from __future__ import annotations
@@ -120,19 +122,37 @@ def build(source: Path, val_runs: set[int], out_dir: Path,
     print(f"inputs={len(inputs)} (set={input_set}, no ILS), labels={len(LABELS)}")
 
 
+def _resolve_source(source: Path | None, config: dict) -> Path:
+    """The source csv to build from: the CLI arg if given, else the augmented csv
+    the config's `augment:` block writes (so a frame pipeline needs no CSV= --
+    build reads the same out_csv it augmented into). gps_cfc has no augment block,
+    so it must be given a source explicitly."""
+    if source is not None:
+        return source
+    out_csv = config.get("augment", {}).get("out_csv")
+    if not out_csv:
+        raise SystemExit("no source csv: pass it as an argument (CSV=...); this "
+                         "config has no augment.out_csv to fall back on (e.g. gps_cfc "
+                         "builds straight from the raw csv)")
+    return Path(out_csv)
+
+
 def main() -> None:
     from boeing_landing.config import load_config
     from boeing_landing.train import DEFAULT_CONFIG
 
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("source", type=Path, help="dataset .zip or extracted .csv")
+    ap.add_argument("source", type=Path, nargs="?", default=None,
+                    help="dataset .zip or .csv (default: the config's augment.out_csv)")
     ap.add_argument("--config", type=Path, default=DEFAULT_CONFIG,
                     help="pipeline config holding the build: section")
     a = ap.parse_args()
 
-    build_cfg = load_config(a.config).get("build", {})
+    config = load_config(a.config)
+    build_cfg = config.get("build", {})
     val_runs = {int(r) for r in build_cfg.get("val_runs", [8])}
-    build(a.source, val_runs, Path(build_cfg.get("out_dir", "datasets/gps_no_ils")),
+    build(_resolve_source(a.source, config), val_runs,
+          Path(build_cfg.get("out_dir", "datasets/gps_no_ils")),
           extra_columns=build_cfg.get("extra_columns") or [],
           input_set=build_cfg.get("input_set", "gps"))
 
