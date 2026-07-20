@@ -19,6 +19,7 @@ from pathlib import Path
 import numpy as np
 
 from boeing_landing.data.features import CANONICAL_INPUTS, extend_order
+from boeing_landing.data.normalization import normalize
 
 
 def _reorder_inputs(npz, input_order: list[str]):
@@ -28,10 +29,6 @@ def _reorder_inputs(npz, input_order: list[str]):
     order = extend_order(input_order, names)
     idx = [names.index(n) for n in order]
     return npz["X"][:, idx], npz["x_min"][idx], npz["x_max"][idx]
-
-
-def _normalize(arr, lo, hi):
-    return (arr - lo) / (hi - lo + 1e-10)
 
 
 def _cut_portions(x, y, portion_len: int, stride: int):
@@ -68,8 +65,8 @@ def load_portions(npz_path: str | Path,
     X, x_min, x_max = _reorder_inputs(npz, input_order)
     Y, y_min, y_max = npz["Y"], npz["y_min"], npz["y_max"]
     if normalized:
-        X = _normalize(X, x_min, x_max)
-        Y = _normalize(Y, y_min, y_max)
+        X = normalize(X, x_min, x_max)
+        Y = normalize(Y, y_min, y_max)
 
     xs, ys = [], []
     for run in np.unique(npz["run"]):

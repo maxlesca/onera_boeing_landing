@@ -13,8 +13,13 @@ from __future__ import annotations
 
 import numpy as np
 
+from boeing_landing.data.normalization import HEADING_SINCOS
+
 GPS = ["latitude", "longitude", "altitude"]
 ATTITUDE = ["pitch", "bank", "heading"]
+# Attitude with the heading sin/cos-encoded (see normalization.ANGLE_ENCODINGS).
+# Used by the local-frame sets; the gps set keeps the raw ATTITUDE unchanged.
+ATTITUDE_LOCAL = ["pitch", "bank"] + HEADING_SINCOS
 ANGULAR_RATES = ["p", "q", "r"]
 BODY_VELOCITY = ["u", "v", "w"]
 NED_VELOCITY = ["northsouth_velocity", "eastwest_velocity", "vertical_velocity"]
@@ -29,8 +34,10 @@ WIND = ["wind_velocity_x", "wind_velocity_y", "wind_velocity_z"]
 # the loader (dataset.use_dt in the config); it is not a CSV column.
 CANONICAL_INPUTS = GPS + ATTITUDE + ANGULAR_RATES + BODY_VELOCITY + NED_VELOCITY + WIND
 
-# The inertial core shared by every input set (everything but the position block).
-INERTIAL = ATTITUDE + ANGULAR_RATES + BODY_VELOCITY + NED_VELOCITY + WIND
+# The inertial core shared by the local-frame input sets (everything but the
+# position block). Uses the sin/cos-encoded heading; the gps set stays on the raw
+# ATTITUDE via CANONICAL_INPUTS above.
+INERTIAL = ATTITUDE_LOCAL + ANGULAR_RATES + BODY_VELOCITY + NED_VELOCITY + WIND
 
 # Local-frame position blocks: the SAME GPS fix, re-expressed at the runway
 # threshold instead of as absolute lat/lon/alt -- GPS is not removed, only

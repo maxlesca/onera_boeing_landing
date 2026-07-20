@@ -30,6 +30,7 @@ build:
   input_set: ils_aligned     # replace GPS with pos_along/cross/up (features.INPUT_SETS)
   val_runs: [8]              # runs held out for validation
   out_dir: datasets/ils_aligned_cfc   # inside the repo, gitignored
+  physical_bounds: true      # fixed airport-independent bounds (data.normalization)
 
 # run evaluation (make evaluate)
 evaluation:

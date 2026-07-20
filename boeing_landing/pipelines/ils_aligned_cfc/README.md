@@ -14,6 +14,20 @@ signs match the ILS deviations: `pos_cross` is positive LEFT like
 Its axis direction is the runway course (the ILS localiser bearing) — that axis
 is the one thing the twin `magnetic_north_cfc` pipeline swaps for magnetic north.
 
+## Normalisation (fixed & centralised)
+
+All normalisation lives in one place, `boeing_landing/data/normalization.py`:
+
+- **Fixed physical bounds** (`build.physical_bounds: true`): the position and
+  attitude channels normalise against airport-independent bounds from the
+  approach envelope (e.g. `pos_along ∈ [-15000, 500] m`, `pitch ∈ [-0.3, 0.3] rad`)
+  instead of this dataset's min/max — so the scale stays stable when new airports
+  are added. The velocity/rate/wind channels keep the train-split min/max.
+- **Heading as sin/cos**: the compass heading wraps at ±π, where a min-max is
+  meaningless, so it is fed as the smooth pair `heading_sin`, `heading_cos`
+  (both bounded [-1, 1]). Pitch and bank stay raw (bounded, no wrap). The pair is
+  derived at build time; the raw `heading` column is not stored as an input.
+
 ## Files
 
 - `augment_ned.py` — raw ldg_*.csv + NavDB (both read-only) → new csv with the

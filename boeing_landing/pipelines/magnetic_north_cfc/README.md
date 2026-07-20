@@ -22,6 +22,17 @@ magnetic bearing, so `declination = true_course(LTP->FPAP) - QFU*10deg`. It is
 coarse (±5°, the QFU is rounded to 10°); a WMM/IGRF model (`pygeomag`, `ppigrf`)
 would refine it if the comparison warrants it.
 
+## Normalisation (fixed & centralised)
+
+Same scheme as `ils_aligned_cfc`, in `boeing_landing/data/normalization.py`
+(`build.physical_bounds: true`, heading as `heading_sin`/`heading_cos`). One
+frame-specific point: the horizontal position bounds are **symmetric and equal**
+on both axes — `pos_north_mag` and `pos_east_mag` are both `[-15000, 15000] m`.
+A runway of any QFU projects its full length onto both geographic axes, so fixing
+them identically is exactly what keeps the magnetic frame airport-independent
+(a data-driven bound would give this N-S runway a tiny east range that would clip
+an east-west runway later).
+
 ## Files
 
 - `augment_magnetic.py` — raw ldg_*.csv + NavDB (both read-only) → new csv with

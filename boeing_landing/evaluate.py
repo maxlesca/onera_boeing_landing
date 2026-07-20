@@ -16,17 +16,24 @@ import json
 from pathlib import Path
 
 from boeing_landing.data.features import (ANGULAR_RATES, ATTITUDE, BODY_VELOCITY,
-                                          GPS, LABELS, NED_VELOCITY, WIND)
+                                          GPS, LABELS, NED_VELOCITY, POS_MAGNETIC,
+                                          POS_RUNWAY, WIND)
+from boeing_landing.data.normalization import HEADING_SINCOS
 from boeing_landing.train import _load_split, _resolve_order
 from utils.config import load_yaml
 from utils.evaluation import (evaluate_arrays, metrics, plot_predictions,
                               regression_metrics, run_ablation_suite)
 
-# Masked one group at a time to measure each group's contribution. Groups the
-# run's dataset does not have are filtered out per run.
+# Masked one group at a time to measure each group's contribution. A run keeps
+# whichever channels of a group it holds; the rest are filtered out per run, so
+# the same table serves the gps set (absolute lat/lon, raw heading) and the
+# local-frame sets (converted position, sin/cos heading). "attitude" lists both
+# the raw heading and its sin/cos pair; only the ones present are masked.
 ABLATION_GROUPS = {
     "gps": GPS,
-    "attitude": ATTITUDE,
+    "position_runway": POS_RUNWAY,
+    "position_magnetic": POS_MAGNETIC,
+    "attitude": ATTITUDE + HEADING_SINCOS,
     "angular_rate": ANGULAR_RATES,
     "body_velocity": BODY_VELOCITY,
     "ned_velocity": NED_VELOCITY,
@@ -36,9 +43,12 @@ ABLATION_GROUPS = {
 
 
 def _ablation_groups(input_labels: list[str]) -> dict:
-    """Only the groups whose channels this run actually has."""
-    return {name: channels for name, channels in ABLATION_GROUPS.items()
-            if set(channels) <= set(input_labels)}
+    """Each group restricted to the channels this run actually has; empty groups
+    (a group the run holds none of) are dropped."""
+    present = set(input_labels)
+    groups = {name: [c for c in channels if c in present]
+              for name, channels in ABLATION_GROUPS.items()}
+    return {name: chans for name, chans in groups.items() if chans}
 
 
 def _find_run_files(run_dir: Path) -> tuple[dict, Path]:

@@ -30,6 +30,7 @@ import numpy as np
 import pandas as pd
 
 from boeing_landing.data.features import INPUT_SETS, LABELS
+from boeing_landing.data.normalization import add_angle_encodings, resolve_bounds
 
 
 def load_csv(source: Path) -> pd.DataFrame:
@@ -69,16 +70,14 @@ def split_runs(df: pd.DataFrame, val_runs: set[int]) -> tuple[pd.DataFrame, pd.D
     return df[~val_mask], df[val_mask]
 
 
-def compute_bounds(train: pd.DataFrame, inputs: list[str]) -> dict:
-    """Min/max normalisation bounds from the train split only."""
-    return {
-        "inputs": inputs,
-        "labels": LABELS,
-        "x_min": train[inputs].min().tolist(),
-        "x_max": train[inputs].max().tolist(),
-        "y_min": train[LABELS].min().tolist(),
-        "y_max": train[LABELS].max().tolist(),
-    }
+def compute_bounds(train: pd.DataFrame, inputs: list[str], physical: bool = False) -> dict:
+    """Normalisation bounds (see data.normalization). With `physical`, channels
+    that have a fixed physical bound use it; every other channel (and all labels)
+    uses the train-split min/max."""
+    x_min, x_max = resolve_bounds(train, inputs, physical)
+    y_min, y_max = resolve_bounds(train, LABELS, physical)
+    return {"inputs": inputs, "labels": LABELS,
+            "x_min": x_min, "x_max": x_max, "y_min": y_min, "y_max": y_max}
 
 
 def save_split(name: str, part: pd.DataFrame, bounds: dict, out_dir: Path) -> None:
@@ -103,23 +102,28 @@ def save_split(name: str, part: pd.DataFrame, bounds: dict, out_dir: Path) -> No
 
 
 def build(source: Path, val_runs: set[int], out_dir: Path,
-          extra_columns: list[str] = (), input_set: str = "gps") -> None:
+          extra_columns: list[str] = (), input_set: str = "gps",
+          physical_bounds: bool = False) -> None:
     """input_set: the base input columns (features.INPUT_SETS -- 'gps' keeps the
     GPS position as absolute lat/lon/alt, 'runway'/'magnetic' convert that same
     position into a local frame). ILS is in none of them.
-    extra_columns: additional CSV columns appended as inputs."""
+    extra_columns: additional CSV columns appended as inputs.
+    physical_bounds: normalise with the fixed physical bounds (data.normalization)
+    where a channel has one -- airport-independent; off by default (gps_cfc)."""
     if input_set not in INPUT_SETS:
         raise SystemExit(f"unknown input_set {input_set!r}; choose from {sorted(INPUT_SETS)}")
     inputs = INPUT_SETS[input_set] + list(extra_columns)
-    df = clean(load_csv(source), inputs)
+    df = add_angle_encodings(load_csv(source), inputs)
+    df = clean(df, inputs)
     train, val = split_runs(df, val_runs)
-    bounds = compute_bounds(train, inputs)
+    bounds = compute_bounds(train, inputs, physical_bounds)
 
     out_dir.mkdir(parents=True, exist_ok=True)
     save_split("train", train, bounds, out_dir)
     save_split("val", val, bounds, out_dir)
     (out_dir / "normalization_bounds.json").write_text(json.dumps(bounds, indent=2), encoding="utf-8")
-    print(f"inputs={len(inputs)} (set={input_set}, no ILS), labels={len(LABELS)}")
+    print(f"inputs={len(inputs)} (set={input_set}, no ILS), labels={len(LABELS)}, "
+          f"physical_bounds={physical_bounds}")
 
 
 def _resolve_source(source: Path | None, config: dict) -> Path:
@@ -154,7 +158,8 @@ def main() -> None:
     build(_resolve_source(a.source, config), val_runs,
           Path(build_cfg.get("out_dir", "datasets/gps_no_ils")),
           extra_columns=build_cfg.get("extra_columns") or [],
-          input_set=build_cfg.get("input_set", "gps"))
+          input_set=build_cfg.get("input_set", "gps"),
+          physical_bounds=bool(build_cfg.get("physical_bounds", False)))
 
 
 if __name__ == "__main__":
