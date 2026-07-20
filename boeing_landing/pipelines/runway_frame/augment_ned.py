@@ -38,65 +38,16 @@ columns and are reported, never dropped.
 from __future__ import annotations
 
 import argparse
-import json
-import re
 from pathlib import Path
 
 import numpy as np
 import pandas as pd
 
-# WGS84 ellipsoid
-_A = 6378137.0
-_F = 1 / 298.257223563
-_E2 = _F * (2 - _F)
+from boeing_landing.data.geodesy import (approach_course, geodetic_to_ned,
+                                         load_navdb, norm_qfu)
 
 POI_COLUMNS = ["poi_latitude", "poi_longitude", "poi_altitude", "poi_course"]
 POS_COLUMNS = ["pos_along", "pos_cross", "pos_up"]
-
-
-def geodetic_to_ecef(lat: np.ndarray, lon: np.ndarray, h: np.ndarray) -> np.ndarray:
-    """WGS84 geodetic (radians, meters) -> ECEF meters, shape (..., 3)."""
-    n = _A / np.sqrt(1 - _E2 * np.sin(lat) ** 2)
-    return np.stack([(n + h) * np.cos(lat) * np.cos(lon),
-                     (n + h) * np.cos(lat) * np.sin(lon),
-                     (n * (1 - _E2) + h) * np.sin(lat)], axis=-1)
-
-
-def ned_matrix(lat: float, lon: float) -> np.ndarray:
-    """Rows are the north/east/down unit vectors (in ECEF) at (lat, lon) rad."""
-    sp, cp, sl, cl = np.sin(lat), np.cos(lat), np.sin(lon), np.cos(lon)
-    return np.array([[-sp * cl, -sp * sl, cp],
-                     [-sl, cl, 0.0],
-                     [-cp * cl, -cp * sl, -sp]])
-
-
-def _norm_qfu(qfu: str) -> str:
-    """Runway designator without zero padding ('07R' -> '7R'): the database
-    mixes both spellings."""
-    m = re.fullmatch(r"0*(\d+)\s*([LRC]?)", str(qfu).strip().upper())
-    if not m:
-        raise SystemExit(f"unparseable runway designator: {qfu!r}")
-    return m.group(1) + m.group(2)
-
-
-def load_navdb(path: Path) -> dict[tuple[str, str], dict]:
-    """{(airport, qfu): {ltp: (lat rad, lon rad, alt m), fpap: (lat rad, lon rad)}}."""
-    db = json.loads(path.read_text())
-    return {(airport.strip(), _norm_qfu(qfu)):
-            {"ltp": (np.radians(e["lat_ltp_ftp"]), np.radians(e["long_ltp_ftp"]),
-                     float(e["alt_ltp_ftp"])),
-             "fpap": (np.radians(e["lat_fpap"]), np.radians(e["long_fpap"]))}
-            for airport, runways in db.items() for qfu, e in runways.items()}
-
-
-def approach_course(entry: dict) -> float:
-    """True course of the approach (rad, from north), bearing LTP -> FPAP:
-    the FPAP is the alignment point of the approach, so this is the direction
-    the aircraft travels at the threshold whichever QFU is flown."""
-    lat0, lon0, alt0 = entry["ltp"]
-    d = (geodetic_to_ecef(*entry["fpap"], alt0) - geodetic_to_ecef(lat0, lon0, alt0))
-    north, east, _ = ned_matrix(lat0, lon0) @ d
-    return float(np.arctan2(east, north))
 
 
 def _course_spin(course: float) -> np.ndarray:
@@ -108,20 +59,13 @@ def _course_spin(course: float) -> np.ndarray:
     return np.array([[c, s, 0.0], [s, -c, 0.0], [0.0, 0.0, -1.0]])
 
 
-def runway_frame(entry: dict) -> tuple[np.ndarray, np.ndarray]:
-    """(ECEF origin, ECEF -> along/cross/down rotation) of a database entry."""
-    lat0, lon0, alt0 = entry["ltp"]
-    return (geodetic_to_ecef(lat0, lon0, alt0),
-            _course_spin(approach_course(entry)) @ ned_matrix(lat0, lon0))
-
-
 def _positions(rows: pd.DataFrame, entry: dict) -> np.ndarray:
-    """(n, 3) along/cross/down of the rows' GPS in the entry's runway frame."""
-    origin, rotation = runway_frame(entry)
-    ecef = geodetic_to_ecef(rows["latitude"].to_numpy(),
-                            rows["longitude"].to_numpy(),
-                            rows["altitude"].to_numpy())
-    return (ecef - origin) @ rotation.T
+    """(n, 3) along/cross/up of the rows' GPS in the entry's runway frame: local
+    NED at the LTP (pymap3d), then spun about Down by the approach course."""
+    lat0, lon0, alt0 = entry["ltp"]
+    ned = geodetic_to_ned(rows["latitude"].to_numpy(), rows["longitude"].to_numpy(),
+                          rows["altitude"].to_numpy(), lat0, lon0, alt0)
+    return ned @ _course_spin(approach_course(entry)).T
 
 
 def augment(df: pd.DataFrame, navdb: dict) -> tuple[pd.DataFrame, list]:
@@ -132,7 +76,7 @@ def augment(df: pd.DataFrame, navdb: dict) -> tuple[pd.DataFrame, list]:
         df[col] = np.nan
     missing = []
     for (airport, runway), rows in df.groupby(["airport", "runway"]):
-        entry = navdb.get((airport.strip(), _norm_qfu(runway)))
+        entry = navdb.get((airport.strip(), norm_qfu(runway)))
         if entry is None:
             missing.append((airport, runway, len(rows)))
             continue
