@@ -29,6 +29,28 @@ WIND = ["wind_velocity_x", "wind_velocity_y", "wind_velocity_z"]
 # the loader (dataset.use_dt in the config); it is not a CSV column.
 CANONICAL_INPUTS = GPS + ATTITUDE + ANGULAR_RATES + BODY_VELOCITY + NED_VELOCITY + WIND
 
+# The inertial core shared by every input set (everything but the position block).
+INERTIAL = ATTITUDE + ANGULAR_RATES + BODY_VELOCITY + NED_VELOCITY + WIND
+
+# Local-frame position blocks: the SAME GPS fix, re-expressed at the runway
+# threshold instead of as absolute lat/lon/alt -- GPS is not removed, only
+# converted. Aligned either with the runway/ILS axis (runway frame,
+# augment_ned.py) or with magnetic north (magnetic frame, augment_magnetic.py).
+# Both swap out absolute lat/lon -- the coordinate the network was memorising per
+# airport -- for its local coordinates, which look the same at every runway.
+POS_RUNWAY = ["pos_along", "pos_cross", "pos_up"]
+POS_MAGNETIC = ["pos_north_mag", "pos_east_mag", "pos_up_mag"]
+
+# The input set a dataset is built with (build.input_set in the config). Each is
+# the ordered list of CSV columns stored as inputs; extra_columns append to it.
+# ILS is in none of them (dropped since gps_cfc); the difference is only how the
+# GPS position is expressed.
+INPUT_SETS = {
+    "gps": CANONICAL_INPUTS,        # GPS as absolute lat/lon/alt + inertial (default, gps_cfc)
+    "runway": POS_RUNWAY + INERTIAL,   # GPS converted to runway/ILS-aligned coords + inertial
+    "magnetic": POS_MAGNETIC + INERTIAL,  # GPS converted to magnetic-north coords + inertial
+}
+
 # throttle_right mirrors throttle_left exactly in the source data (checked:
 # max |left-right| = 0.0); kept as a label anyway so the controller outputs
 # the full command set -- it doubles the throttle weight in the MSE.
@@ -68,4 +90,10 @@ FEATURE_ORDERS = {
     "random_1": random_order(1),
     "random_2": random_order(2),
     "random_3": random_order(3),
+    # canonical order of each local-frame input set (position block first, then
+    # the inertial core), so the loader can reorder a runway/magnetic npz -- these
+    # npz carry the GPS position as local coords, not absolute lat/lon, so the
+    # lat/lon-based orders above do not apply to them.
+    "runway": INPUT_SETS["runway"],
+    "magnetic": INPUT_SETS["magnetic"],
 }

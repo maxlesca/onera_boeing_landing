@@ -1,17 +1,43 @@
-# runway_frame — aircraft GPS re-expressed in the landing runway's frame
+# runway_frame — GPS position converted to the runway's frame (ILS-aligned)
 
-Pipeline-specific code (only this pipeline uses it, hence it lives here):
+**Converts** the GPS position from absolute lat/lon/alt (which the network was
+memorising per airport) into coordinates **at the runway threshold, along the
+runway/ILS axis**. GPS is not removed — it is the same fix, re-expressed — so
+every approach now looks the same wherever the runway is on Earth and whichever
+QFU is flown. ILS is not used (as in `gps_cfc`).
 
-- `augment_ned.py` — raw ldg_*.csv + NavDB (both read-only) → new csv with
-  the landing runway's LTP/FTP as origin (`poi_*`) and the aircraft position
-  in ILS-signed runway coordinates (`pos_along`, `pos_cross`, `pos_up`)
-- `plot_runway_frame.py` — approach trajectories of an augmented csv:
-  top view, vertical profile, localizer cross-check
+The frame is built as `geodetic --(pymap3d)--> local NED at the LTP --(spin about
+Down by the approach course)--> along/cross/up`. The spin is mirrored so the
+signs match the ILS deviations: `pos_cross` is positive LEFT like
+`localizer_error_m`, `pos_up` positive like `glideslope_error_m`.
+
+Its axis direction is the runway course (the ILS localiser bearing) — that axis
+is the one thing the twin `magnetic_frame` pipeline swaps for magnetic north.
+
+## Files
+
+- `augment_ned.py` — raw ldg_*.csv + NavDB (both read-only) → new csv with the
+  runway's LTP/FTP as origin (`poi_*`) and the aircraft position in ILS-signed
+  runway coordinates (`pos_along`, `pos_cross`, `pos_up`)
+- `plot_runway_frame.py` — approach trajectories of an augmented csv: top view,
+  vertical profile, localizer cross-check
+- `base.yaml` — training config (inertial + `pos_along/cross/up` → Conv1D →
+  CfC); same engine and hyperparameters as `gps_cfc`, only the input set differs
+
+Geodesy helpers (`geodetic_to_ned`, `approach_course`, …) are shared and live in
+`boeing_landing/data/geodesy.py` (a thin wrapper over **pymap3d**); only the
+ILS-signed spin `_course_spin` is specific to this pipeline.
 
 ```bash
-make augment          # datasets/ldg_dataset_images.csv -> ..._ned.csv
-make trajectories     # pyplot window; SAVE=1 -> figures/dataset/
+make augment CONFIG=runway_frame                        # -> ..._ned.csv (path from the config)
+make trajectories NED_CSV=datasets/ldg_dataset_images_ned.csv   # SAVE=1 -> figures/dataset/
+make dataset CSV=datasets/ldg_dataset_images_ned.csv CONFIG=runway_frame
+make train   CONFIG=runway_frame ORDER=runway
 ```
 
-The training config (`base.yaml` + variants) will join this folder once the
-complete NavDB (MSLP, YPAD) is delivered.
+The augmentation to run and its output path come from this pipeline's `augment:`
+config block, so the single `make augment CONFIG=...` target serves every frame.
+
+> The augmentation leaves NaN for any (airport, runway) missing from the NavDB;
+> those runs are dropped at dataset build. The complete NavDB (MSLP, YPAD) is
+> still pending delivery.
