@@ -3,14 +3,16 @@
 #     conda env create -f environment.yml
 #     conda activate boeing_landing
 #
-# Ce fichier NE duplique PAS la liste des paquets : il délègue à
+# Les paquets Python NE sont PAS dupliqués ici : ce fichier délègue à
 # requirements.txt (source unique de vérité), pour que venv et conda installent
-# exactement la même chose.
+# exactement les mêmes. Les outils non-Python (make) restent des dépendances
+# conda -- ils n'ont pas leur place dans requirements.txt (pip).
 name: boeing_landing
 channels:
   - conda-forge
 dependencies:
   - python=3.12
+  - make            # `make augment/dataset/train ...` (GNU make, conda-forge)
   - pip
   - pip:
       - -r requirements.txt
