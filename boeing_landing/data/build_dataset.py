@@ -31,19 +31,27 @@ from boeing_landing.data.features import INPUT_SETS, LABELS
 
 
 def load_csv(source: Path) -> pd.DataFrame:
-    """Read the dataset CSV, from a .zip or a plain .csv (';'-separated)."""
+    """Read the dataset CSV, from a .zip or a plain .csv (';'-separated).
+    low_memory=False: the runway designator column mixes '16R' and '2', which
+    otherwise triggers a mixed-dtype warning."""
     if source.suffix.lower() == ".zip":
         with zipfile.ZipFile(source) as z:
             name = next(n for n in z.namelist() if n.endswith(".csv"))
             print(f"reading {name} from {source.name}")
-            return pd.read_csv(io.BytesIO(z.read(name)), sep=";")
-    return pd.read_csv(source, sep=";")
+            return pd.read_csv(io.BytesIO(z.read(name)), sep=";", low_memory=False)
+    return pd.read_csv(source, sep=";", low_memory=False)
 
 
 def clean(df: pd.DataFrame, inputs: list[str]) -> pd.DataFrame:
     """Drop rows with missing fields, add an int `run`, sort by (run, time)."""
     n_total = len(df)
     needed = ["simulationindex", "time", "image_filename"] + list(inputs) + LABELS
+    missing = [c for c in needed if c not in df.columns]
+    if missing:
+        raise SystemExit(
+            f"CSV lacks the columns {missing}. The local-frame pipelines need the "
+            f"AUGMENTED csv: run `make augment CONFIG=<pipeline>` first and pass its "
+            f"output (..._ned.csv / ..._mag.csv) as CSV=..., not the raw csv.")
     df = df.dropna(subset=needed).copy()
     print(f"{n_total} rows read, {n_total - len(df)} dropped (NaN), {len(df)} kept")
     df["run"] = df["simulationindex"].astype(int)
