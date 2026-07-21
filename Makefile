@@ -5,7 +5,9 @@
 PYTHON  ?= $(if $(wildcard .venv/bin/python),.venv/bin/python,$(if $(wildcard .venv/Scripts/python.exe),.venv/Scripts/python.exe,python))
 CSV     ?=
 CONFIG  ?= gps_cfc
-ORDER   ?= grouped
+# ORDER overrides the conv channel order for the ordering study; empty by default
+# so each pipeline uses its own dataset.input_order from the yaml.
+ORDER   ?=
 # CONFIG accepts: a pipeline name (gps_cfc -> pipelines/gps_cfc/base.yaml),
 # a pipeline/variant pair (gps_cfc/quick -> pipelines/gps_cfc/quick.yaml),
 # or a full path to a yaml (used verbatim).
@@ -42,8 +44,8 @@ augment:  ## augment the raw csv the way CONFIG says: make augment CONFIG=ils_al
 trajectories:  ## plot the approaches of the augmented csv: make trajectories [NED_CSV=...] [SAVE=1]
 	$(PYTHON) -m boeing_landing.pipelines.ils_aligned_cfc.plot_runway_frame $(NED_CSV) $(if $(SAVE),--save)
 
-train:  ## train a pipeline: make train CONFIG=gps_cfc ORDER=grouped (EPOCHS=3 for a quick trial)
-	$(PYTHON) -m boeing_landing.train --config $(CFGPATH) --input-order $(ORDER) $(if $(EPOCHS),--max-epochs $(EPOCHS))
+train:  ## train a pipeline: make train CONFIG=ils_aligned_cfc (ORDER=... overrides the yaml's input_order; EPOCHS=3 for a quick trial)
+	$(PYTHON) -m boeing_landing.train --config $(CFGPATH) $(if $(ORDER),--input-order $(ORDER)) $(if $(EPOCHS),--max-epochs $(EPOCHS))
 
 evaluate:  ## metrics + ablations of a run: make evaluate RUN=runs/<pipeline>/<variant>/<timestamp>
 	$(PYTHON) -m boeing_landing.evaluate --run $(RUN)

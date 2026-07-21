@@ -96,11 +96,13 @@ make trajectories [NED_CSV=datasets/ldg_dataset_images_ned.csv] [SAVE=1]
     # plot the approaches of an augmented csv: top view, vertical profile, and
     # pos_cross vs the sim localizer (expected y = x). SAVE=1 -> figures/dataset/.
 
-make train [CONFIG=gps_cfc] [ORDER=grouped] [EPOCHS=n]
+make train CONFIG=<pipeline> [ORDER=...] [EPOCHS=n]
     # CONFIG: pipeline name (gps_cfc -> its base.yaml), pipeline/variant
     #         (gps_cfc/quick, gps_cfc/long) or path to a yaml.
-    # ORDER: conv channel order — grouped, gps_first, gps_last, pos_vel, by_axis,
-    #        reversed, random_1..3 (see data/features.py).
+    # ORDER: optional -- overrides the conv channel order set by the yaml's
+    #        dataset.input_order. Only for the ordering study: grouped, gps_first,
+    #        gps_last, pos_vel, by_axis, reversed, random_1..3 (see data/features.py).
+    #        Each pipeline defaults to its own order, so it is not needed normally.
     # EPOCHS: override training.max_epochs for a quick trial (e.g. EPOCHS=3).
 
 make evaluate RUN=runs/<pipeline>/<variant>/<timestamp>

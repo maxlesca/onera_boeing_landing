@@ -45,7 +45,7 @@ ILS-signed spin `_course_spin` is specific to this pipeline.
 ```bash
 make augment CONFIG=ils_aligned_cfc RAW_CSV=datasets/ldg_dataset_images.csv   # raw -> augment.out_csv; RAW_CSV picks the source dataset
 make dataset CONFIG=ils_aligned_cfc      # reads augment.out_csv back, derived (no CSV= needed)
-make train   CONFIG=ils_aligned_cfc ORDER=ils_aligned
+make train   CONFIG=ils_aligned_cfc      # uses the yaml's input_order (ils_aligned); ORDER=... only to override
 make trajectories NED_CSV=datasets/ldg_dataset_images_ned.csv   # SAVE=1 -> figures/dataset/
 ```
 

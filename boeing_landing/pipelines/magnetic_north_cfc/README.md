@@ -47,7 +47,7 @@ only the declination-from-QFU and the spin `_declination_spin` are specific here
 ```bash
 make augment CONFIG=magnetic_north_cfc RAW_CSV=datasets/ldg_dataset_images.csv   # raw -> augment.out_csv; RAW_CSV picks the source dataset
 make dataset CONFIG=magnetic_north_cfc   # reads augment.out_csv back, derived (no CSV= needed)
-make train   CONFIG=magnetic_north_cfc ORDER=magnetic_north
+make train   CONFIG=magnetic_north_cfc   # uses the yaml's input_order (magnetic_north); ORDER=... only to override
 ```
 
 The augmentation to run and its output path come from this pipeline's `augment:`
