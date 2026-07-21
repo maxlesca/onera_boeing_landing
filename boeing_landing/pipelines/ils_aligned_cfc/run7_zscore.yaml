@@ -1,0 +1,19 @@
+# ils_aligned_cfc variant -- val on run 7. LEVER: z-score normalisation instead of
+# min-max (no data change -- just a different rescale). Each channel is centred to
+# mean 0, std 1 on the train split: unbounded and centred, softer in the tails than
+# a hard [0,1], and a natural fit for lecun_tanh. run 7's out-of-range wind becomes
+# a moderate z (e.g. ~+2 sigma) rather than a >1 min-max clip. physical_bounds is
+# inherited but IGNORED under z-score (z-score uses mean/std, not min/max).
+# Distinct npz (params are mean/std, not min/max).
+#   make dataset CONFIG=ils_aligned_cfc/run7_zscore
+#   make train   CONFIG=ils_aligned_cfc/run7_zscore
+extends: base.yaml
+
+build:
+  val_runs: [7]
+  norm_method: zscore
+  out_dir: datasets/ils_aligned_cfc_run7_zscore
+
+dataset:
+  train_npz: datasets/ils_aligned_cfc_run7_zscore/landing_train.npz
+  val_npz: datasets/ils_aligned_cfc_run7_zscore/landing_val.npz

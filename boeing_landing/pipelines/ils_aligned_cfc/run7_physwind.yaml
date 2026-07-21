@@ -1,0 +1,19 @@
+# ils_aligned_cfc variant -- val on run 7. LEVER: normalisation only (no data is
+# changed). With the default data-driven bounds, run 7's real wind (wind_y ~ +7.6,
+# above the train max) normalises OUTSIDE [0,1] -> the network extrapolates. Using
+# a FIXED operational wind/velocity/rate envelope (physical_bounds: all) rescales
+# the SAME real value into [0,1], so the learned function is evaluated in its
+# interpolation zone. Only the min/max used to scale changes -- every recorded
+# value stays exactly as measured. Distinct npz (bounds differ from the base split).
+#   make dataset CONFIG=ils_aligned_cfc/run7_physwind
+#   make train   CONFIG=ils_aligned_cfc/run7_physwind
+extends: base.yaml
+
+build:
+  val_runs: [7]
+  physical_bounds: all        # position+attitude (as base) AND wind/velocities/rates
+  out_dir: datasets/ils_aligned_cfc_run7_physwind
+
+dataset:
+  train_npz: datasets/ils_aligned_cfc_run7_physwind/landing_train.npz
+  val_npz: datasets/ils_aligned_cfc_run7_physwind/landing_val.npz

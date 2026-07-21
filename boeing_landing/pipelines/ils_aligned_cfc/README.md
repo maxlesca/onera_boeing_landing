@@ -52,21 +52,34 @@ make trajectories NED_CSV=datasets/ldg_dataset_images_ned.csv   # SAVE=1 -> figu
 The augmentation to run and its output path come from this pipeline's `augment:`
 config block, so the single `make augment CONFIG=...` target serves every frame.
 
-## Variants (`extends`)
+## Variants (`extends`) — the run-7 out-of-distribution study
 
-Both validate on **run 7** (the wind outlier, see `make run-report`) — a wind
-out-of-distribution test — and share the same run-7 npz (`datasets/
-ils_aligned_cfc_run7/`, the split is identical). They differ only in the lr:
+All validate on **run 7** (the wind outlier, see `make run-report`): a wind
+out-of-distribution test where val_loss stalls on a floor (~0.036) the base
+setup can't break. Each variant changes **one lever** to try to lower that floor;
+none alters any recorded value.
 
-- `val_run7.yaml` — **base hyperparameters** (lr 0.001): isolates the effect of
-  the run-7 split with everything else equal to `base.yaml`.
-- `run7_lowlr.yaml` — same split with a **lower lr** (3e-4).
+| Variant | Lever | npz |
+|---|---|---|
+| `val_run7` | none (base params) — the reference | `..._run7` |
+| `run7_lowlr` | lower lr (3e-4) | `..._run7` |
+| `run7_reg` | backbone dropout 0.2 (curb memorisation) | `..._run7` |
+| `run7_physwind` | `physical_bounds: all` (wind in a fixed range -> in [0,1]) | `..._run7_physwind` |
+| `run7_zscore` | `norm_method: zscore` (centred, unbounded) | `..._run7_zscore` |
 
 ```bash
-make dataset CONFIG=ils_aligned_cfc/val_run7      # build the run-7 npz once
-make train   CONFIG=ils_aligned_cfc/val_run7      # base params
-make train   CONFIG=ils_aligned_cfc/run7_lowlr    # lower lr (same npz)
+make dataset CONFIG=ils_aligned_cfc/val_run7        # base run-7 npz (val_run7, run7_lowlr, run7_reg)
+make dataset CONFIG=ils_aligned_cfc/run7_physwind   # its own npz (different bounds)
+make dataset CONFIG=ils_aligned_cfc/run7_zscore     # its own npz (mean/std params)
+make train   CONFIG=ils_aligned_cfc/<variant>       # e.g. run7_physwind
 ```
+
+> **Comparing across normalisation** (min-max vs z-score): `val_loss` is **not**
+> comparable — the labels sit on different scales, so the MSE is in different
+> units. Use the scale-invariant **R2** from `make evaluate RUN=...` instead.
+>
+> The honest ceiling: run 7 is genuine extrapolation (an unseen wind); these
+> levers help at the margin — the real fix is more runs (more wind conditions).
 
 > The augmentation leaves NaN for any (airport, runway) missing from the NavDB;
 > those runs are dropped at dataset build. The complete NavDB (MSLP, YPAD) is
