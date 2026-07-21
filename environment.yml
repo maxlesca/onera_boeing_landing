@@ -5,14 +5,15 @@
 #
 # Les paquets Python NE sont PAS dupliqués ici : ce fichier délègue à
 # requirements.txt (source unique de vérité), pour que venv et conda installent
-# exactement les mêmes. Les outils non-Python (make) restent des dépendances
-# conda -- ils n'ont pas leur place dans requirements.txt (pip).
+# exactement les mêmes. Les outils non-Python (make, git-lfs) restent des
+# dépendances conda -- ils n'ont pas leur place dans requirements.txt (pip).
 name: boeing_landing
 channels:
   - conda-forge
 dependencies:
   - python=3.12
   - make            # `make augment/dataset/train ...` (GNU make, conda-forge)
+  - git-lfs         # LFS-tracked weights in the Yolo_models_LARD_V2 submodule
   - pip
   - pip:
       - -r requirements.txt

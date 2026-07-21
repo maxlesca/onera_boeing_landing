@@ -2,8 +2,15 @@
 # Versions épinglées = reproductibilité entre machines (venv OU conda).
 #
 # torch est ici en build CPU (2.13.0). Sur une machine à GPU, remplacer par le
-# build CUDA correspondant (voir https://pytorch.org). Le build CPU tourne
-# partout sans driver à faire matcher — c'est le défaut portable.
+# build CUDA correspondant à la version CUDA du DRIVER (ex. driver 12.2 ->
+# `pip install torch==2.13.0 --index-url https://download.pytorch.org/whl/cu121`;
+# un build trop récent pour le driver plante au premier appel CUDA). Le build CPU
+# tourne partout sans driver à faire matcher — c'est le défaut portable.
+#
+# Outil non-Python requis (hors pip) : git-lfs, pour les poids LFS du sous-module
+# Yolo_models_LARD_V2 (sinon `git status` casse). conda l'installe via
+# environment.yml ; en venv, l'installer par l'OS (apt/brew) ou `conda install
+# -c conda-forge git-lfs`, puis `git lfs install`.
 #
 # Installation :
 #   venv  :  python -m venv .venv && .venv/Scripts/pip install -r requirements.txt
