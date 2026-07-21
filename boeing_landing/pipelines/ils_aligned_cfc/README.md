@@ -52,6 +52,14 @@ make trajectories NED_CSV=datasets/ldg_dataset_images_ned.csv   # SAVE=1 -> figu
 The augmentation to run and its output path come from this pipeline's `augment:`
 config block, so the single `make augment CONFIG=...` target serves every frame.
 
+## Variants (`extends`)
+
+- `run7_lowlr.yaml` — validate on **run 7** (the wind outlier, see `make
+  run-report`) with a lower learning rate: a wind out-of-distribution test.
+  It reuses the same augmented csv, so only rebuild the npz and train:
+  `make dataset CONFIG=ils_aligned_cfc/run7_lowlr` then
+  `make train CONFIG=ils_aligned_cfc/run7_lowlr`.
+
 > The augmentation leaves NaN for any (airport, runway) missing from the NavDB;
 > those runs are dropped at dataset build. The complete NavDB (MSLP, YPAD) is
 > still pending delivery.

@@ -1,0 +1,26 @@
+# ils_aligned_cfc variant -- validate on run 7 with a lower learning rate.
+# Run 7 is the wind outlier (see `make run-report`): it holds the most atypical
+# wind (wind_y ~ +7.6, the only strongly positive one), invisible to the other
+# inputs, so validating on it tests generalisation to an unseen wind. The lower
+# lr aims for steadier convergence on this harder, out-of-distribution split.
+#
+# Extends base.yaml (same augmentation, runway frame, fixed bounds, sin/cos
+# heading); overrides only the split, the lr and the output paths so it never
+# clobbers the run-8 npz/runs. No re-augment needed -- the augmented csv is
+# split-independent; just:
+#   make dataset CONFIG=ils_aligned_cfc/run7_lowlr
+#   make train   CONFIG=ils_aligned_cfc/run7_lowlr
+extends: base.yaml
+
+training:
+  lr: 0.0003                 # 3x lower than base (0.001)
+
+build:
+  val_runs: [7]              # run 7 = wind outlier held out
+  out_dir: datasets/ils_aligned_cfc_run7   # distinct from the run-8 split
+
+dataset:
+  train_npz: datasets/ils_aligned_cfc_run7/landing_train.npz
+  val_npz: datasets/ils_aligned_cfc_run7/landing_val.npz
+
+checkpoint_name: ils_aligned_cfc_run7
