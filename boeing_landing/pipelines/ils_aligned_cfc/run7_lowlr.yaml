@@ -5,8 +5,11 @@
 # lr aims for steadier convergence on this harder, out-of-distribution split.
 #
 # Extends base.yaml (same augmentation, runway frame, fixed bounds, sin/cos
-# heading); overrides only the split, the lr and the output paths so it never
-# clobbers the run-8 npz/runs. No re-augment needed -- the augmented csv is
+# heading); overrides only the split, the lr and the npz paths so it never
+# clobbers the run-8 split. checkpoint_name is left inherited (ils_aligned_cfc)
+# on purpose: the run lands in runs/ils_aligned_cfc/run7_lowlr_<order>/, i.e. a
+# VARIANT under its parent pipeline (the run_tag = this file's stem separates it),
+# not a pipeline of its own. No re-augment needed -- the augmented csv is
 # split-independent; just:
 #   make dataset CONFIG=ils_aligned_cfc/run7_lowlr
 #   make train   CONFIG=ils_aligned_cfc/run7_lowlr
@@ -17,10 +20,8 @@ training:
 
 build:
   val_runs: [7]              # run 7 = wind outlier held out
-  out_dir: datasets/ils_aligned_cfc_run7   # distinct from the run-8 split
+  out_dir: datasets/ils_aligned_cfc_run7   # distinct npz from the run-8 split
 
 dataset:
   train_npz: datasets/ils_aligned_cfc_run7/landing_train.npz
   val_npz: datasets/ils_aligned_cfc_run7/landing_val.npz
-
-checkpoint_name: ils_aligned_cfc_run7
