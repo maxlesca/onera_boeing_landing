@@ -30,7 +30,7 @@ import numpy as np
 import pandas as pd
 
 from boeing_landing.data.features import INPUT_SETS, LABELS
-from boeing_landing.data.normalization import add_angle_encodings, resolve_bounds
+from boeing_landing.data.normalization import add_angle_encodings, resolve_norm
 
 
 def load_csv(source: Path) -> pd.DataFrame:
@@ -70,13 +70,16 @@ def split_runs(df: pd.DataFrame, val_runs: set[int]) -> tuple[pd.DataFrame, pd.D
     return df[~val_mask], df[val_mask]
 
 
-def compute_bounds(train: pd.DataFrame, inputs: list[str], physical: bool = False) -> dict:
-    """Normalisation bounds (see data.normalization). With `physical`, channels
-    that have a fixed physical bound use it; every other channel (and all labels)
-    uses the train-split min/max."""
-    x_min, x_max = resolve_bounds(train, inputs, physical)
-    y_min, y_max = resolve_bounds(train, LABELS, physical)
-    return {"inputs": inputs, "labels": LABELS,
+def compute_bounds(train: pd.DataFrame, inputs: list[str], physical=False,
+                   method: str = "minmax") -> dict:
+    """Normalisation params (see data.normalization). `method`: 'minmax' (default)
+    or 'zscore'. For minmax, `physical` (True/"core" -> position+attitude, "all" ->
+    also wind/velocities/rates) uses the fixed bound for channels that have one;
+    every other channel (and all labels) uses the train-split stat. x_min/x_max
+    hold (min,max) for minmax and (mean,std) for zscore."""
+    x_min, x_max = resolve_norm(train, inputs, method, physical)
+    y_min, y_max = resolve_norm(train, LABELS, method, physical)
+    return {"inputs": inputs, "labels": LABELS, "norm_method": method,
             "x_min": x_min, "x_max": x_max, "y_min": y_min, "y_max": y_max}
 
 
@@ -92,6 +95,7 @@ def save_split(name: str, part: pd.DataFrame, bounds: dict, out_dir: Path) -> No
         image=part["image_filename"].to_numpy(),
         input_names=np.array(inputs),
         label_names=np.array(LABELS),
+        norm_method=np.array(bounds.get("norm_method", "minmax")),
         x_min=np.array(bounds["x_min"], np.float32),
         x_max=np.array(bounds["x_max"], np.float32),
         y_min=np.array(bounds["y_min"], np.float32),
@@ -103,7 +107,7 @@ def save_split(name: str, part: pd.DataFrame, bounds: dict, out_dir: Path) -> No
 
 def build(source: Path, val_runs: set[int], out_dir: Path,
           extra_columns: list[str] = (), input_set: str = "gps",
-          physical_bounds: bool = False) -> None:
+          physical_bounds=False, norm_method: str = "minmax") -> None:
     """input_set: the base input columns (features.INPUT_SETS -- 'gps' keeps the
     GPS position as absolute lat/lon/alt, 'runway'/'magnetic' convert that same
     position into a local frame). ILS is in none of them.
@@ -116,14 +120,14 @@ def build(source: Path, val_runs: set[int], out_dir: Path,
     df = add_angle_encodings(load_csv(source), inputs)
     df = clean(df, inputs)
     train, val = split_runs(df, val_runs)
-    bounds = compute_bounds(train, inputs, physical_bounds)
+    bounds = compute_bounds(train, inputs, physical_bounds, norm_method)
 
     out_dir.mkdir(parents=True, exist_ok=True)
     save_split("train", train, bounds, out_dir)
     save_split("val", val, bounds, out_dir)
     (out_dir / "normalization_bounds.json").write_text(json.dumps(bounds, indent=2), encoding="utf-8")
     print(f"inputs={len(inputs)} (set={input_set}, no ILS), labels={len(LABELS)}, "
-          f"physical_bounds={physical_bounds}")
+          f"norm={norm_method}, physical_bounds={physical_bounds}")
 
 
 def _resolve_source(source: Path | None, config: dict) -> Path:
@@ -159,7 +163,8 @@ def main() -> None:
           Path(build_cfg.get("out_dir", "datasets/gps_no_ils")),
           extra_columns=build_cfg.get("extra_columns") or [],
           input_set=build_cfg.get("input_set", "gps"),
-          physical_bounds=bool(build_cfg.get("physical_bounds", False)))
+          physical_bounds=build_cfg.get("physical_bounds", False),
+          norm_method=build_cfg.get("norm_method", "minmax"))
 
 
 if __name__ == "__main__":

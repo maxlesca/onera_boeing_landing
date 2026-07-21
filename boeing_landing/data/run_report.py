@@ -29,9 +29,10 @@ def _load_pooled(train_npz: Path, val_npz: Path):
     zt, zv = np.load(train_npz, allow_pickle=True), np.load(val_npz, allow_pickle=True)
     names = [str(n) for n in zt["input_names"]]
     lo, hi = zt["x_min"].astype(float), zt["x_max"].astype(float)
+    method = str(zt["norm_method"]) if "norm_method" in zt else "minmax"
     x = np.vstack([zt["X"].astype(float), zv["X"].astype(float)])
     run = np.concatenate([zt["run"], zv["run"]]).astype(int)
-    return normalize(x, lo, hi), x, run, names, lo, hi
+    return normalize(x, lo, hi, method), x, run, names, lo, hi
 
 
 def per_run_matrix(x_norm: np.ndarray, run: np.ndarray):

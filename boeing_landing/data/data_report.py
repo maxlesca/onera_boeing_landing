@@ -35,8 +35,9 @@ OVERFLOW_PCT = 5.0    # % of val frames outside [0,1] worth flagging
 
 def _load(npz_path: Path):
     z = np.load(npz_path, allow_pickle=True)
+    method = str(z["norm_method"]) if "norm_method" in z else "minmax"
     return (z["X"].astype(float), [str(n) for n in z["input_names"]],
-            z["x_min"].astype(float), z["x_max"].astype(float))
+            z["x_min"].astype(float), z["x_max"].astype(float), method)
 
 
 def _flag(norm_std: float, val_out_pct: float) -> str:
@@ -51,9 +52,9 @@ def _flag(norm_std: float, val_out_pct: float) -> str:
 
 def feature_stats(train_npz: Path, val_npz: Path) -> list[dict]:
     """One row of diagnostics per input channel."""
-    x_tr, names, lo, hi = _load(train_npz)
-    x_va, _, _, _ = _load(val_npz)
-    n_tr, n_va = normalize(x_tr, lo, hi), normalize(x_va, lo, hi)
+    x_tr, names, lo, hi, method = _load(train_npz)
+    x_va = _load(val_npz)[0]
+    n_tr, n_va = normalize(x_tr, lo, hi, method), normalize(x_va, lo, hi, method)
     rows = []
     for i, name in enumerate(names):
         col, ntr, nva = x_tr[:, i], n_tr[:, i], n_va[:, i]
@@ -132,7 +133,10 @@ def main() -> None:
     d = load_config(a.config)["dataset"]
     train_npz, val_npz = PROJECT_ROOT / d["train_npz"], PROJECT_ROOT / d["val_npz"]
     rows = feature_stats(train_npz, val_npz)
-    print(f"dataset: {train_npz.parent.name}  ({len(rows)} input channels)")
+    method = _load(train_npz)[4]
+    print(f"dataset: {train_npz.parent.name}  ({len(rows)} input channels, norm={method})")
+    if method != "minmax":
+        print("note: the [0,1]-based columns (span, val_out%, weak flag) assume min-max.")
     print_report(rows)
 
     if a.save:

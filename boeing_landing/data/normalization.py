@@ -34,7 +34,14 @@ ANGLE_ENCODINGS = {
 # Fixed physical bounds (min, max). Position is in metres at the runway threshold;
 # attitude in radians. Ranges observed on the ZBTJ data are noted for reference;
 # the bounds are the approach envelope (wider), not a dataset fit -- tune here.
-PHYSICAL_BOUNDS = {
+#
+# Two tiers, selected by build.physical_bounds:
+#   true / "core" -> _CORE_BOUNDS only (position + attitude);
+#   "all"         -> _CORE_BOUNDS + _EXTENDED_BOUNDS (also wind, velocities, rates).
+# The extended tier matters for out-of-distribution robustness: with data-driven
+# bounds a held-out run whose wind is outside the train range normalises OUTSIDE
+# [0,1] (extrapolation); a fixed operational envelope keeps it in range.
+_CORE_BOUNDS = {
     # attitude (rad) -- sourced envelope: pitch approach, bank CS-25 40 deg max
     "pitch": (-0.35, 0.35),   # ~20 deg   (data ~ +-0.12)
     "bank":  (-0.70, 0.70),   # ~40 deg   (data ~ +-0.14)
@@ -52,6 +59,35 @@ PHYSICAL_BOUNDS = {
     "pos_up_mag":    (0.0, 1000.0),
 }
 
+# Extended tier (build.physical_bounds: all) -- sourced operational envelope from
+# the 737 FCTM / CS-25 (see DOC 8.13), wide enough to contain a held-out run's
+# wind/velocities so they normalise inside [0,1] instead of extrapolating.
+_EXTENDED_BOUNDS = {
+    "wind_velocity_x": (-20.0, 20.0),   # crosswind/tailwind envelope (m/s)
+    "wind_velocity_y": (-20.0, 20.0),
+    "wind_velocity_z": (-5.0, 5.0),
+    "u": (0.0, 120.0),                  # body velocities (m/s)
+    "v": (-15.0, 15.0),
+    "w": (-10.0, 10.0),
+    "northsouth_velocity": (-120.0, 120.0),   # NEU velocities (m/s)
+    "eastwest_velocity":   (-120.0, 120.0),
+    "vertical_velocity":   (-10.0, 10.0),
+    "p": (-0.5, 0.5),                   # body rates (rad/s)
+    "q": (-0.5, 0.5),
+    "r": (-0.5, 0.5),
+}
+
+# Kept as a public name (data_report and older imports) = the core tier.
+PHYSICAL_BOUNDS = _CORE_BOUNDS
+
+
+def bounds_table(mode) -> dict:
+    """Fixed-bounds table for build.physical_bounds `mode`: 'all' adds the
+    extended tier (wind/velocities/rates); anything else truthy = core only."""
+    if mode == "all":
+        return {**_CORE_BOUNDS, **_EXTENDED_BOUNDS}
+    return _CORE_BOUNDS
+
 
 def add_angle_encodings(df, columns):
     """Add every *_sin/*_cos channel requested in `columns`, each derived from its
@@ -67,13 +103,15 @@ def add_angle_encodings(df, columns):
     return df
 
 
-def resolve_bounds(train, columns, use_physical: bool) -> tuple[list, list]:
-    """Per-column (min, max): the fixed physical bound when `use_physical` and the
-    column has one, else the train-split min/max. Returns two aligned lists."""
+def resolve_bounds(train, columns, physical) -> tuple[list, list]:
+    """Per-column (min, max): the fixed physical bound when `physical` is truthy
+    and the column has one in the selected tier (see bounds_table), else the
+    train-split min/max. Returns two aligned lists."""
+    table = bounds_table(physical) if physical else {}
     lo, hi = [], []
     for c in columns:
-        if use_physical and c in PHYSICAL_BOUNDS:
-            a, b = PHYSICAL_BOUNDS[c]
+        if c in table:
+            a, b = table[c]
         else:
             a, b = float(train[c].min()), float(train[c].max())
         lo.append(a)
@@ -81,6 +119,24 @@ def resolve_bounds(train, columns, use_physical: bool) -> tuple[list, list]:
     return lo, hi
 
 
-def normalize(arr, lo, hi):
-    """Min-max to [0,1]; the +1e-10 guards a channel that is constant on train."""
-    return (arr - lo) / (hi - lo + 1e-10)
+def resolve_norm(train, columns, method: str = "minmax", physical=False) -> tuple[list, list]:
+    """Per-column (a, b) normalisation params for `method`:
+    - 'minmax': (min, max) -- the fixed physical bound where `physical` selects one;
+    - 'zscore': (mean, std) from the train split (physical is ignored -- z-score is
+      a mean/std rescale, not a min/max one).
+    The pair is stored in the npz; `normalize` reads `method` back to apply it."""
+    if method == "zscore":
+        return ([float(train[c].mean()) for c in columns],
+                [float(train[c].std()) for c in columns])
+    return resolve_bounds(train, columns, physical)
+
+
+def normalize(arr, a, b, method: str = "minmax"):
+    """Apply `method` with the two per-channel params (a, b) from resolve_norm:
+    - 'minmax': (x - a) / (b - a)  -> [0,1]      (a=min, b=max);
+    - 'zscore': (x - a) / b        -> mean 0, std 1  (a=mean, b=std).
+    The +1e-10 guards a channel that is constant on train."""
+    a, b = np.asarray(a), np.asarray(b)
+    if method == "zscore":
+        return (arr - a) / (b + 1e-10)
+    return (arr - a) / (b - a + 1e-10)

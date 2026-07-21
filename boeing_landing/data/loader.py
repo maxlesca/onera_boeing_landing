@@ -64,9 +64,10 @@ def load_portions(npz_path: str | Path,
     npz = np.load(npz_path, allow_pickle=True)
     X, x_min, x_max = _reorder_inputs(npz, input_order)
     Y, y_min, y_max = npz["Y"], npz["y_min"], npz["y_max"]
+    method = str(npz["norm_method"]) if "norm_method" in npz else "minmax"
     if normalized:
-        X = normalize(X, x_min, x_max)
-        Y = normalize(Y, y_min, y_max)
+        X = normalize(X, x_min, x_max, method)
+        Y = normalize(Y, y_min, y_max, method)
 
     xs, ys = [], []
     for run in np.unique(npz["run"]):
