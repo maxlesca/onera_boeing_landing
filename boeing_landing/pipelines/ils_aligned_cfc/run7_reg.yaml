@@ -3,6 +3,11 @@
 # constant wind as a run tag), then stalls on run 7's unseen wind. Dropout in the
 # CfC backbone curbs that memorisation so the learned function is smoother and may
 # extrapolate a little better. Same run-7 npz as val_run7 (only the model changes).
+#
+# NOTE (21/07/2026): ncps only inserts the Dropout layer BETWEEN backbone layers
+# (`for i in range(1, backbone_layers)` in cfc_cell.py). With backbone_layers: 1 the
+# dropout is silently a no-op -- that is why the first run7_reg was bit-identical to
+# val_run7. We therefore also set backbone_layers: 2 so the dropout actually applies.
 #   make dataset CONFIG=ils_aligned_cfc/val_run7        # if not built yet
 #   make train   CONFIG=ils_aligned_cfc/run7_reg
 extends: base.yaml
@@ -16,4 +21,5 @@ dataset:
   val_npz: datasets/ils_aligned_cfc_run7/landing_val.npz
 
 model:
+  backbone_layers: 2          # was 1; required for backbone_dropout to take effect
   backbone_dropout: 0.2       # was 0.0; curbs wind memorisation
