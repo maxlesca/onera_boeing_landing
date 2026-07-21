@@ -1,0 +1,20 @@
+# ils_aligned_cfc variant -- validate on run 7 with the BASE hyperparameters.
+# Identical to base.yaml except the split (val = run 7, the wind outlier): it
+# isolates the effect of the harder wind-OOD validation with EVERYTHING ELSE
+# unchanged -- notably the lr stays 0.001 (unlike run7_lowlr, which also lowers
+# it). checkpoint_name is left inherited so the run nests as a variant:
+# runs/ils_aligned_cfc/val_run7_<order>/.
+#
+# Shares the run-7 npz with run7_lowlr: the split -- hence the npz -- is the same,
+# lr is a train-time knob. Build once, then train either variant:
+#   make dataset CONFIG=ils_aligned_cfc/val_run7
+#   make train   CONFIG=ils_aligned_cfc/val_run7
+extends: base.yaml
+
+build:
+  val_runs: [7]              # run 7 = wind outlier held out
+  out_dir: datasets/ils_aligned_cfc_run7   # same run-7 split as run7_lowlr
+
+dataset:
+  train_npz: datasets/ils_aligned_cfc_run7/landing_train.npz
+  val_npz: datasets/ils_aligned_cfc_run7/landing_val.npz

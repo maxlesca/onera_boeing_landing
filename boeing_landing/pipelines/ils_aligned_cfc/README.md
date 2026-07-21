@@ -54,11 +54,19 @@ config block, so the single `make augment CONFIG=...` target serves every frame.
 
 ## Variants (`extends`)
 
-- `run7_lowlr.yaml` — validate on **run 7** (the wind outlier, see `make
-  run-report`) with a lower learning rate: a wind out-of-distribution test.
-  It reuses the same augmented csv, so only rebuild the npz and train:
-  `make dataset CONFIG=ils_aligned_cfc/run7_lowlr` then
-  `make train CONFIG=ils_aligned_cfc/run7_lowlr`.
+Both validate on **run 7** (the wind outlier, see `make run-report`) — a wind
+out-of-distribution test — and share the same run-7 npz (`datasets/
+ils_aligned_cfc_run7/`, the split is identical). They differ only in the lr:
+
+- `val_run7.yaml` — **base hyperparameters** (lr 0.001): isolates the effect of
+  the run-7 split with everything else equal to `base.yaml`.
+- `run7_lowlr.yaml` — same split with a **lower lr** (3e-4).
+
+```bash
+make dataset CONFIG=ils_aligned_cfc/val_run7      # build the run-7 npz once
+make train   CONFIG=ils_aligned_cfc/val_run7      # base params
+make train   CONFIG=ils_aligned_cfc/run7_lowlr    # lower lr (same npz)
+```
 
 > The augmentation leaves NaN for any (airport, runway) missing from the NavDB;
 > those runs are dropped at dataset build. The complete NavDB (MSLP, YPAD) is
