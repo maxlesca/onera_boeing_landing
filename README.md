@@ -80,13 +80,17 @@ other CSV columns as-is. Each pipeline config owns its dataset directory
 accepts (`OPT=value`); options in brackets are optional and show their default.
 
 ```bash
-make dataset CSV=path/to.csv [CONFIG=gps_cfc]
-    # build the npz from the CSV. CSV: source file (machine-specific).
-    # CONFIG: pipeline whose build: section decides val runs / out dir / extra inputs.
+make dataset CONFIG=<pipeline> [CSV=path/to.csv]
+    # build the npz. CONFIG: pipeline whose build: section decides input set /
+    # val runs / out dir (gps_cfc, ils_aligned_cfc, magnetic_north_cfc). CSV:
+    # source file; optional for the frame pipelines (falls back to their
+    # augment.out_csv), required for gps_cfc.
 
-make augment [RAW_CSV=datasets/ldg_dataset_images.csv] [NAVDB=datasets/NavDB_MFS.json] [NED_CSV=...]
-    # write NED_CSV = RAW_CSV + 7 runway-frame columns (poi_*, pos_along/cross/up).
-    # The sources are read-only; runways missing from the NavDB keep NaN.
+make augment CONFIG=<pipeline> [RAW_CSV=datasets/ldg_dataset_images.csv] [NAVDB=datasets/NavDB_MFS.json]
+    # augment RAW_CSV the way CONFIG's augment: block says (which augmentation
+    # module, which out_csv). CONFIG = ils_aligned_cfc or magnetic_north_cfc; it
+    # is required (gps_cfc has no augment: block). Sources are read-only; runways
+    # missing from the NavDB keep NaN.
 
 make trajectories [NED_CSV=datasets/ldg_dataset_images_ned.csv] [SAVE=1]
     # plot the approaches of an augmented csv: top view, vertical profile, and
