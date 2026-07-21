@@ -54,7 +54,27 @@ conda env create -f environment.yml && conda activate boeing_landing
 `make` auto-detects the interpreter (Linux venv, Windows venv — including from
 WSL — or the active conda env); no variable to pass.
 
-`torch` is the CPU build by default; swap for a CUDA build on a GPU machine.
+### GPU or CPU
+
+`torch` is the CPU build by default, so training runs anywhere. On a GPU machine,
+install a `torch` build matching your **driver's** CUDA version — e.g. a driver
+capped at CUDA 12.2 needs the cu121 wheel:
+
+```bash
+pip install torch==2.13.0 --index-url https://download.pytorch.org/whl/cu121
+```
+
+A build newer than the driver crashes at the first CUDA call (`NVIDIA driver ...
+is too old`). To train on CPU regardless — broken/mismatched GPU, or simply to
+avoid it — hide the device from the process:
+
+```bash
+CUDA_VISIBLE_DEVICES="" make train CONFIG=ils_aligned_cfc
+```
+
+Setting `accelerator: cpu` in the yaml is **not** enough on its own: Lightning
+still snapshots the CUDA RNG while the GPU is visible, which re-triggers the
+driver error. Hiding the device (above) is the robust switch.
 
 ## Data
 
