@@ -121,6 +121,11 @@ make data-report CONFIG=<pipeline> [SAVE=1]
     # (weak/near-constant channels), and % of val frames outside the train
     # bounds (distribution shift). SAVE=1 -> figures/dataset/.
 
+make run-report CONFIG=<pipeline> [SAVE=1]
+    # per-run distribution: ranks which run is an outlier and on which channel
+    # (fingerprint heatmap + extremeness bar + wind scatter). Helps pick a
+    # "far" validation run. SAVE=1 -> figures/dataset/.
+
 make train CONFIG=<pipeline> [ORDER=...] [EPOCHS=n]
     # CONFIG: pipeline name (gps_cfc -> its base.yaml), pipeline/variant
     #         (gps_cfc/quick, gps_cfc/long) or path to a yaml.

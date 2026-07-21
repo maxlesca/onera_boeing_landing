@@ -14,7 +14,7 @@ ORDER   ?=
 CFGPATH  = $(if $(findstring .yaml,$(CONFIG)),$(if $(findstring /,$(CONFIG)),$(CONFIG),boeing_landing/pipelines/$(basename $(CONFIG))/base.yaml),$(if $(findstring /,$(CONFIG)),boeing_landing/pipelines/$(CONFIG).yaml,boeing_landing/pipelines/$(CONFIG)/base.yaml))
 
 .DEFAULT_GOAL := help
-.PHONY: help install deps dataset augment trajectories data-report train evaluate plots plots-orders \
+.PHONY: help install deps dataset augment trajectories data-report run-report train evaluate plots plots-orders \
         experiment-order experiment-convergence quadrotor-train quadrotor-test clean
 
 help:  ## show this help
@@ -46,6 +46,9 @@ trajectories:  ## plot the approaches of the augmented csv: make trajectories [N
 
 data-report:  ## per-channel diagnostics (weak/near-constant channels, [0,1] use, val shift): make data-report CONFIG=ils_aligned_cfc [SAVE=1]
 	$(PYTHON) -m boeing_landing.data.data_report --config $(CFGPATH) $(if $(SAVE),--save)
+
+run-report:  ## per-run distribution (which run is an outlier, on which channel): make run-report CONFIG=ils_aligned_cfc [SAVE=1]
+	$(PYTHON) -m boeing_landing.data.run_report --config $(CFGPATH) $(if $(SAVE),--save)
 
 train:  ## train a pipeline: make train CONFIG=ils_aligned_cfc (ORDER=... overrides the yaml's input_order; EPOCHS=3 for a quick trial)
 	$(PYTHON) -m boeing_landing.train --config $(CFGPATH) $(if $(ORDER),--input-order $(ORDER)) $(if $(EPOCHS),--max-epochs $(EPOCHS))
