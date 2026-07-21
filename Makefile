@@ -15,7 +15,7 @@ CFGPATH  = $(if $(findstring .yaml,$(CONFIG)),$(if $(findstring /,$(CONFIG)),$(C
 
 .DEFAULT_GOAL := help
 .PHONY: help install deps dataset augment trajectories data-report run-report train evaluate plots plots-orders \
-        experiment-order experiment-convergence quadrotor-train quadrotor-test clean
+        experiment-order experiment-convergence loro loro-plot quadrotor-train quadrotor-test clean
 
 help:  ## show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | \
@@ -67,6 +67,15 @@ experiment-order:  ## sweep the conv channel orders and compare val loss
 
 experiment-convergence:  ## train the config under several seeds (experiments.seeds)
 	$(PYTHON) -m boeing_landing.experiments.convergence --config $(CFGPATH)
+
+loro:  ## leave-one-run-out CV of a recipe: make loro CONFIG=ils_aligned_cfc [PB=all] [NORM=zscore] [TAG=..] [SAVE=1] [EPOCHS=3]
+	$(PYTHON) -m boeing_landing.experiments.leave_one_run_out --config $(CFGPATH) \
+	  $(if $(PB),--physical-bounds $(PB)) $(if $(NORM),--norm-method $(NORM)) \
+	  $(if $(TAG),--tag $(TAG)) $(if $(EPOCHS),--max-epochs $(EPOCHS)) $(if $(RUNS),--runs $(RUNS)) \
+	  $(if $(NOR2),--no-r2) $(if $(REUSE),--reuse-data) $(if $(SAVE),--save)
+
+loro-plot:  ## re-render LORO figure(s) from saved results.json, NO training: make loro-plot RESULTS="runs/loro/ils_core/results.json [runs/loro/ils_all/results.json]" [SAVE=1]
+	$(PYTHON) -m boeing_landing.experiments.leave_one_run_out --compare $(RESULTS) $(if $(SAVE),--save)
 
 quadrotor-train:  ## train the quadrotor baseline (settings: quadrotor_baseline/train_config.yaml)
 	$(PYTHON) -m quadrotor_baseline.train

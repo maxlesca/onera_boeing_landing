@@ -150,6 +150,14 @@ make plots-orders [CONFIG=gps_cfc] [STAMP=prefix] [SAVE=1] [NOISE=0.005]
 
 make experiment-order [CONFIG=gps_cfc]        # train one run per channel order, rank by val_loss
 make experiment-convergence [CONFIG=gps_cfc]  # same config under experiments.seeds (stability)
+make loro CONFIG=<pipeline> [PB=all] [NORM=zscore] [TAG=..] [SAVE=1]
+    # leave-one-run-out CV: hold out every run in turn, train K models, report
+    # the recipe's mean generalisation (val_loss + scale-invariant mean R2).
+    # PB/NORM override build.physical_bounds / norm_method to test a lever without
+    # a new yaml. Writes runs/loro/<tag>/results.json (always) + a PNG (SAVE=1).
+make loro-plot RESULTS="runs/loro/a/results.json [runs/loro/b/results.json]" [SAVE=1]
+    # re-render figure(s) from saved results.json, NO training: one file -> that
+    # arm's val_loss+R2 panels; several -> the side-by-side comparison of arms.
 
 make quadrotor-train     # train the quadrotor baseline (its own train_config.yaml)
 make quadrotor-test [PLOT=1]   # evaluate it (model picked in its test_config.yaml)
