@@ -116,6 +116,11 @@ make trajectories [NED_CSV=datasets/ldg_dataset_images_ned.csv] [SAVE=1]
     # plot the approaches of an augmented csv: top view, vertical profile, and
     # pos_cross vs the sim localizer (expected y = x). SAVE=1 -> figures/dataset/.
 
+make data-report CONFIG=<pipeline> [SAVE=1]
+    # per-channel diagnostics of a built npz: raw range/std, spread in [0,1]
+    # (weak/near-constant channels), and % of val frames outside the train
+    # bounds (distribution shift). SAVE=1 -> figures/dataset/.
+
 make train CONFIG=<pipeline> [ORDER=...] [EPOCHS=n]
     # CONFIG: pipeline name (gps_cfc -> its base.yaml), pipeline/variant
     #         (gps_cfc/quick, gps_cfc/long) or path to a yaml.
