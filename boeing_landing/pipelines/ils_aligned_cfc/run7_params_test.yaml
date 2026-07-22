@@ -1,0 +1,31 @@
+# tbd
+extends: base.yaml
+
+training:
+  max_epochs: 40             # On compense la baisse du LR par plus d'époques
+  lr: 0.0005                 # Divisé par 2 ou 10 (essayez 5e-4 ou 1e-4)
+  seed: 42
+  gradient_clip_val: 1.0     # Indispensable si le LR "rebondit"
+  early_stopping_patience: 8
+
+dataset:
+  portion_len: 250        # Séquences plus longues (~10s)
+  stride: 12             # Plus de chevauchement pour multiplier les exemples
+  with_noise: true       # Crucial pour la robustesse en Behavior Cloning
+
+sequencing:
+  seq_len: 5             # Fenêtre glissante pour le Conv1D
+
+model:
+  no_neurons_layer: 128  # Plus de capacité
+  backbone_units: 128
+  backbone_dropout: 0.1  # Anti-surapprentissage
+  mixed_memory: true     # Combine la stabilité LSTM aux dynamiques CfC
+
+build:
+  val_runs: [7]              # run 7 = wind outlier held out
+  out_dir: datasets/ils_aligned_cfc_run7_params_test   # same run-7 split as run7_lowlr
+
+dataset:
+  train_npz: datasets/ils_aligned_cfc_run7_params_test/landing_train.npz
+  val_npz: datasets/ils_aligned_cfc_run7_params_test/landing_val.npz
