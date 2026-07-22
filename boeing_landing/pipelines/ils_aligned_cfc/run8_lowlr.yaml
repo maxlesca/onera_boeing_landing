@@ -1,0 +1,13 @@
+# tbd
+
+extends: base.yaml
+
+training:
+  lr: 0.0001
+
+build:              
+  out_dir: datasets/ils_aligned_cfc_run8_lowlr   # same run-7 split as run7_lowlr
+
+dataset:
+  train_npz: datasets/ils_aligned_cfc_run8_lowlr/landing_train.npz
+  val_npz: datasets/ils_aligned_cfc_run8_lowlr/landing_val.npz
