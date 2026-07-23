@@ -15,6 +15,7 @@ import json
 import re
 import time
 from datetime import datetime
+from functools import lru_cache
 from pathlib import Path
 
 import lightning as L
@@ -39,6 +40,37 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_CONFIG = PROJECT_ROOT / "boeing_landing" / "pipelines" / "gps_cfc" / "base.yaml"
 
 
+@lru_cache(maxsize=8)
+def _read_npz_meta(path: str, mtime_ns: int, size: int) -> tuple[list[str], list[str]]:
+    """Read a split's channel names, memoised on the file's identity.
+
+    Args:
+        path: the npz.
+        mtime_ns, size: its stat, part of the key -- a rebuilt npz is a
+            different entry, so the cache can never serve stale names.
+    Returns:
+        (input_names, label_names), the latter falling back to LABELS for a npz
+        built before label_names existed.
+    """
+    npz = np.load(path, allow_pickle=True)
+    labels = [str(n) for n in npz["label_names"]] if "label_names" in npz else list(LABELS)
+    return [str(n) for n in npz["input_names"]], labels
+
+
+def _npz_meta(npz_path: str) -> tuple[list[str], list[str]]:
+    """The channel names of a split.
+
+    Args:
+        npz_path: the split.
+    Returns:
+        (input_names, label_names). The archive is opened once per file and per
+        process: a seed sweep or a LORO fold resolves the order and the labels
+        several times, and each open inflates the members again.
+    """
+    stat = Path(npz_path).stat()
+    return _read_npz_meta(str(npz_path), stat.st_mtime_ns, stat.st_size)
+
+
 def _resolve_order(dataset_cfg: dict) -> list[str]:
     """The channel order a config asks for, as actual channel names.
 
@@ -56,8 +88,7 @@ def _resolve_order(dataset_cfg: dict) -> list[str]:
     name = dataset_cfg.get("input_order", "grouped")
     if name not in FEATURE_ORDERS:
         raise SystemExit(f"unknown input_order {name!r}; choose from {sorted(FEATURE_ORDERS)}")
-    names = np.load(dataset_cfg["train_npz"], allow_pickle=True)["input_names"]
-    return extend_order(FEATURE_ORDERS[name], [str(n) for n in names])
+    return extend_order(FEATURE_ORDERS[name], _npz_meta(dataset_cfg["train_npz"])[0])
 
 
 def _npz_labels(dataset_cfg: dict) -> list[str]:
@@ -67,11 +98,9 @@ def _npz_labels(dataset_cfg: dict) -> list[str]:
         dataset_cfg: the config's dataset section, read for `train_npz`.
     Returns:
         Its label_names -- the npz is the source of truth here, so a pipeline
-        that changed build.label_set cannot be trained against a stale list --
-        falling back to LABELS only for a npz built before label_names existed.
+        that changed build.label_set cannot be trained against a stale list.
     """
-    npz = np.load(dataset_cfg["train_npz"], allow_pickle=True)
-    return [str(n) for n in npz["label_names"]] if "label_names" in npz else list(LABELS)
+    return _npz_meta(dataset_cfg["train_npz"])[1]
 
 
 def _sequence(x, y, seq_len: int):
@@ -90,8 +119,7 @@ def _sequence(x, y, seq_len: int):
 
 
 def _load_split(npz_path: str, order: list[str], portion_len: int, stride: int,
-                seq_len: int, use_dt: bool = False, noise_std: float = 0.0,
-                seed: int = 42):
+                seq_len: int, use_dt: bool = False):
     """One split, from npz to sequenced tensors.
 
     Args:
@@ -100,14 +128,68 @@ def _load_split(npz_path: str, order: list[str], portion_len: int, stride: int,
         portion_len, stride: the portion cutting (see data.loader).
         seq_len: sequencing window (see _sequence).
         use_dt: append the per-frame dt channel for the CfC timespans.
-        noise_std: sigma of the input perturbation; 0 disables it.
-        seed: seed of that perturbation.
     Returns:
-        (x, y), ready for DatasetController.
+        (x, y), ready for DatasetController. Never perturbed: input noise is
+        applied per fetch by NoisyInputs, not baked into the tensors.
     """
     x, y = load_portions(npz_path, order, portion_len=portion_len, stride=stride,
-                         use_dt=use_dt, noise_std=noise_std, seed=seed)
+                         use_dt=use_dt)
     return _sequence(x, y, seq_len)
+
+
+class NoisyInputs(torch.utils.data.Dataset):
+    """Gaussian noise on the normalised inputs, redrawn on every fetch.
+
+    Behavioural cloning only sees the states the expert visited; perturbing the
+    inputs covers a thin tube around them. That only works if the perturbation
+    is resampled: noise drawn once and baked into the tensors is just a second
+    fixed dataset, which the network memorises exactly like the clean one.
+
+    Labels stay untouched -- the target is still the command the expert issued
+    in the true state -- and so does the dt channel, whose timespans must stay
+    exact.
+    """
+
+    def __init__(self, dataset, std: float, n_channels: int, seed: int):
+        """Wrap a dataset.
+
+        Args:
+            dataset: the clean DatasetController.
+            std: sigma in normalised units.
+            n_channels: how many leading channels to perturb, i.e. everything
+                but the trailing dt channel when the config appends one.
+            seed: seed of the draw generator. With num_workers > 0 each worker
+                copies it, so the noise stays random but is no longer
+                reproducible sample by sample.
+        Returns:
+            Nothing.
+        """
+        self.dataset = dataset
+        self.std = std
+        self.n_channels = n_channels
+        self.generator = torch.Generator().manual_seed(seed)
+
+    def __len__(self):
+        """Dataset size.
+
+        Returns:
+            The wrapped dataset's length, unchanged.
+        """
+        return len(self.dataset)
+
+    def __getitem__(self, idx):
+        """Fetch one sample and perturb it.
+
+        Args:
+            idx: its index.
+        Returns:
+            (inputs + fresh noise on their first n_channels, labels unchanged).
+        """
+        x, y = self.dataset[idx]
+        x = x.clone()
+        noise = torch.randn(x[..., :self.n_channels].shape, generator=self.generator)
+        x[..., :self.n_channels] += noise * self.std
+        return x, y
 
 
 def _dataloaders(config: dict):
@@ -118,7 +200,8 @@ def _dataloaders(config: dict):
     Returns:
         (train_loader, val_loader, input_dim, output_dim). The dt channel is
         split off as timespans before the model sees the data, so it does not
-        count in input_dim (same convention as the baseline).
+        count in input_dim (same convention as the baseline). Only the training
+        loader is perturbed: the score must measure the model, not the seed.
     """
     d = config["dataset"]
     order = _resolve_order(d)
@@ -127,18 +210,25 @@ def _dataloaders(config: dict):
     noise = float(d.get("noise_std", 0.0)) if d.get("with_noise") else 0.0
     seed = int(config.get("training", {}).get("seed", 42))
     xtr, ytr = _load_split(d["train_npz"], order, int(d["portion_len"]), int(d["stride"]),
-                           seq_len, use_dt, noise, seed)
-    # validation is never perturbed: the score must measure the model, not the seed
+                           seq_len, use_dt)
     xva, yva = _load_split(d["val_npz"], order, int(d["portion_len"]), int(d["stride"]), seq_len, use_dt)
 
     train_set, val_set = DatasetController(xtr, ytr), DatasetController(xva, yva)
     lc = config["dataloader"]
     kw = dict(batch_size=lc["batch_size"], num_workers=lc["num_workers"],
-              pin_memory=lc["pin_memory"], drop_last=lc["drop_last"])
+              pin_memory=lc["pin_memory"])
     input_dim = int(train_set.input.shape[-1]) - (1 if use_dt else 0)
-    return (torch.utils.data.DataLoader(train_set, shuffle=True, **kw),
-            torch.utils.data.DataLoader(val_set, shuffle=False, **kw),
-            input_dim, int(train_set.output.shape[-1]))
+    output_dim = int(train_set.output.shape[-1])
+    train_data = NoisyInputs(train_set, noise, input_dim, seed) if noise > 0 else train_set
+    # drop_last applies to TRAINING only. On validation it would throw away the
+    # tail portions, and a split shorter than one batch would yield NO batch at
+    # all -- every leave-one-run-out fold of ned_wind_cfc is in that case
+    # (17-29 portions held out, batch 32), leaving no val_loss to checkpoint on.
+    return (torch.utils.data.DataLoader(train_data, shuffle=True,
+                                        drop_last=lc["drop_last"], **kw),
+            torch.utils.data.DataLoader(val_set, shuffle=False,
+                                        drop_last=False, **kw),
+            input_dim, output_dim)
 
 
 def _with_dataset(config: dict, **fields) -> dict:
@@ -252,6 +342,20 @@ class EpochTimer(L.Callback):
         pl_module.log("epoch_time_s", time.time() - self._t0)
 
 
+def _logging_enabled(config: dict) -> bool:
+    """Whether this run will have a logger at all.
+
+    Args:
+        config: read for training.log_every_n_steps -- 0 means no metrics file
+            (checkpointing and early stopping still work, they read the metrics
+            in memory).
+    Returns:
+        True when a logger is attached. Single source for the decision, because
+        a callback that writes to the logger must not be added without one.
+    """
+    return int(config["training"].get("log_every_n_steps", 1)) > 0
+
+
 def _callbacks(config: dict, run_dir: Path):
     """The callbacks a run needs.
 
@@ -268,8 +372,9 @@ def _callbacks(config: dict, run_dir: Path):
                                  save_top_k=1, mode="min")
     cbs = [checkpoint, GradNorm(), EpochTimer()]
     # only when a schedule is on: with a constant lr the logged curve is a flat
-    # line that says nothing, and metrics.csv stays comparable to older runs
-    if wants_schedule(config):
+    # line that says nothing, and metrics.csv stays comparable to older runs.
+    # And only with a logger: Lightning refuses this callback without one.
+    if wants_schedule(config) and _logging_enabled(config):
         cbs.append(LearningRateMonitor(logging_interval="epoch"))
     patience = int(config["training"].get("early_stopping_patience", 0))
     if patience > 0:
@@ -289,10 +394,9 @@ def _trainer(config: dict, run_dir: Path, callbacks) -> L.Trainer:
         The configured trainer.
     """
     t = config["training"]
-    # log_every_n_steps > 0: metrics.csv written at that rate; 0: no logging at
-    # all (checkpointing/early stopping still work, they read metrics in memory)
     n_log = int(t.get("log_every_n_steps", 1))
-    logging = {"logger": None, "log_every_n_steps": n_log} if n_log > 0 else {"logger": False}
+    logging = ({"logger": None, "log_every_n_steps": n_log} if _logging_enabled(config)
+               else {"logger": False})
     return L.Trainer(
         max_epochs=int(t["max_epochs"]),
         accelerator=t.get("accelerator", "auto"),

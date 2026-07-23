@@ -130,8 +130,11 @@ def prepare(sims: pd.DataFrame, airports: pd.DataFrame) -> tuple[pd.DataFrame, l
         airports: the airport table -- a check only, no column of it enters the
             dataset.
     Returns:
-        (canonical frame sorted by run then time, uncovered runways).
+        (canonical frame sorted by run then time, warnings). The warnings are
+        finished sentences: this module is the only one that knows what its own
+        check means, and the dispatcher prints whatever it is handed.
     """
     df = drop_unused(rename_columns(sims))
-    return df.sort_values(["simulationindex", "time"]).reset_index(drop=True), \
-        missing_runways(df, airports)
+    warnings = [f"{airport} {runway} is flown but absent from the airport table"
+                for airport, runway in missing_runways(df, airports)]
+    return df.sort_values(["simulationindex", "time"]).reset_index(drop=True), warnings

@@ -106,25 +106,6 @@ def _dt_channel(t_run: np.ndarray) -> np.ndarray:
     return dt
 
 
-def _add_noise(X: np.ndarray, std: float, seed: int) -> np.ndarray:
-    """Gaussian noise on the normalised inputs, i.i.d. per frame and channel.
-
-    Behavioural cloning only sees the states the expert visited; perturbing the
-    inputs covers a thin tube around them. Labels stay untouched -- the target is
-    still the command the expert issued in the true state.
-
-    Args:
-        X: normalised inputs (frames, channels).
-        std: sigma in normalised units, so it reads as a fraction of a channel's
-            range whatever that channel's physical unit is.
-        seed: draw seed; the same seed gives the same perturbation.
-    Returns:
-        A perturbed copy of X, same shape and dtype.
-    """
-    rng = np.random.default_rng(seed)
-    return X + rng.normal(0.0, std, X.shape).astype(X.dtype)
-
-
 def _run_channels(run_ids: np.ndarray, times: np.ndarray, X: np.ndarray,
                   Y: np.ndarray, run: int, use_dt: bool) -> tuple:
     """One run's frames, in chronological order and in Tudor's channel-major
@@ -151,10 +132,12 @@ def load_portions(npz_path: str | Path,
                   portion_len: int = 125,
                   stride: int = 25,
                   normalized: bool = True,
-                  use_dt: bool = False,
-                  noise_std: float = 0.0,
-                  seed: int = 42):
+                  use_dt: bool = False):
     """Load one split as training tensors, cut into fixed-length portions.
+
+    No input noise here: perturbing the tensors once would freeze one
+    perturbation for the whole run. The training noise is drawn per fetch by
+    train.NoisyInputs instead.
 
     Args:
         npz_path: the split written by build_dataset.
@@ -168,11 +151,6 @@ def load_portions(npz_path: str | Path,
         use_dt: append the raw per-frame time step as a LAST channel, after any
             reordering; Lightning_Model splits it off as the CfC timespans --
             the conv_cfc baseline recipe. Conservative default: opt-in.
-        noise_std: sigma of the gaussian perturbation on the normalised inputs
-            (see _add_noise); 0 disables it. Callers pass it for the training
-            split only. The dt channel is appended afterwards, so timespans
-            stay exact.
-        seed: seed of that perturbation.
     Returns:
         (input_array, output_array), each (n_portions, features, portion_len)
         float32, portions ordered by run then by start frame -- the order
@@ -185,19 +163,19 @@ def load_portions(npz_path: str | Path,
     if normalized:
         X = normalize(X, x_min, x_max, method)
         Y = normalize(Y, y_min, y_max, method)
-    if noise_std > 0:
-        X = _add_noise(X, noise_std, seed)
 
+    # read once: an NpzFile inflates the member on every access, and these two
+    # are read for every run of the split
+    runs, times = npz["run"], npz["t"]
     # a portion never crosses a run: the CfC keeps memory within one and resets
     # between them, exactly like Tudor's short trajectories
     portions = [portion
-                for run in np.unique(npz["run"])
+                for run in np.unique(runs)
                 for portion in _cut_portions(
-                    *_run_channels(npz["run"], npz["t"], X, Y, run, use_dt),
+                    *_run_channels(runs, times, X, Y, run, use_dt),
                     portion_len, stride)]
     input_array = np.stack([x for x, _ in portions]).astype(np.float32)
     output_array = np.stack([y for _, y in portions]).astype(np.float32)
-    noise = f", noise sigma={noise_std}" if noise_std > 0 else ""
     print(f"{Path(npz_path).name}: {len(input_array)} portions of {portion_len} "
-          f"({input_array.shape[1]} inputs, {output_array.shape[1]} outputs{noise})")
+          f"({input_array.shape[1]} inputs, {output_array.shape[1]} outputs)")
     return input_array, output_array

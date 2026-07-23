@@ -271,8 +271,11 @@ class Lightning_Model(L.LightningModule):
         # computed downstream (MSE, per-channel R2, ablations) must see the whole
         # split. Keeping y_hat[0] scored one portion per batch, i.e. 1/batch_size
         # of the validation data.
-        self.all_yhat.append(y_hat)
-        self.all_target.append(y)
+        # Moved off the accelerator here rather than after the concatenation:
+        # keeping the whole split on the device, plus a full-size copy for the
+        # cat, is an out-of-memory on a large split for no benefit.
+        self.all_yhat.append(y_hat.detach().cpu())
+        self.all_target.append(y.detach().cpu())
         self.log('test_loss', loss, sync_dist=True)
         return {'test_loss': loss}
 

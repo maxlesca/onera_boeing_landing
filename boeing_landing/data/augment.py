@@ -16,12 +16,13 @@ simply have no `augment:` section.
 from __future__ import annotations
 
 import argparse
-import importlib
 from pathlib import Path
 
 import pandas as pd
 
 from boeing_landing.data.geodesy import load_navdb
+from boeing_landing.data.step import (load_module, report_warnings,
+                                      resolve_path, step_config, write_csv)
 
 
 def run_augment(config: dict, source: Path | None = None, navdb: Path | None = None,
@@ -42,26 +43,20 @@ def run_augment(config: dict, source: Path | None = None, navdb: Path | None = N
         SystemExit: the config declares no augmentation, or the output would
             overwrite one of the inputs.
     """
-    cfg = config.get("augment")
-    if not cfg:
-        raise SystemExit("this config has no `augment:` section -- its pipeline "
-                         "uses the raw csv directly (e.g. gps_cfc), nothing to augment")
-    source = source or Path(cfg["raw_csv"])
-    navdb = navdb or Path(cfg["navdb"])
-    out = output or Path(cfg["out_csv"])
-    if out.resolve() in (source.resolve(), navdb.resolve()):
-        raise SystemExit("refusing to overwrite an input file")
+    cfg = step_config(config, "augment", "its pipeline uses the raw csv "
+                      "directly (e.g. gps_cfc), nothing to augment")
+    source = resolve_path(cfg, "raw_csv", source)
+    navdb = resolve_path(cfg, "navdb", navdb)
+    out = resolve_path(cfg, "out_csv", output)
 
-    module = importlib.import_module(cfg["module"])
+    module = load_module(cfg)
     df = pd.read_csv(source, sep=";", low_memory=False)
     augmented, missing = module.augment(df, load_navdb(navdb))
-    out.parent.mkdir(parents=True, exist_ok=True)
-    augmented.to_csv(out, sep=";", index=False)
+    write_csv(augmented, out, [source, navdb])
 
     done = augmented[module.POS_COLUMNS[0]].notna()
     print(f"{done.sum()}/{len(augmented)} rows augmented ({cfg['module']}) -> {out}")
-    for airport, runway, n in missing:
-        print(f"  WARNING: {airport} {runway} not in the nav database ({n} rows left NaN)")
+    report_warnings(missing)
     return out
 
 

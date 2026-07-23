@@ -21,10 +21,12 @@ Pipelines fed a csv that is already canonical simply have no `prepare:` section.
 from __future__ import annotations
 
 import argparse
-import importlib
 from pathlib import Path
 
 import pandas as pd
+
+from boeing_landing.data.step import (load_module, report_warnings,
+                                      resolve_path, step_config, write_csv)
 
 
 def load_source(path: Path) -> pd.DataFrame:
@@ -70,26 +72,20 @@ def run_prepare(config: dict, sims: Path | None, side: Path | None,
         SystemExit: the config declares no preparation, or the output would
             overwrite one of the inputs.
     """
-    cfg = config.get("prepare")
-    if not cfg:
-        raise SystemExit("this config has no `prepare:` section -- its pipeline reads "
-                         "an already canonical csv (nothing to prepare)")
-    sims = sims or Path(cfg["sims_csv"])
-    side = side or Path(cfg["side_csv"])
-    out = output or Path(cfg["out_csv"])
-    if out.resolve() in (sims.resolve(), side.resolve()):
-        raise SystemExit("refusing to overwrite an input file")
+    cfg = step_config(config, "prepare", "its pipeline reads an already "
+                      "canonical csv (nothing to prepare)")
+    sims = resolve_path(cfg, "sims_csv", sims)
+    side = resolve_path(cfg, "side_csv", side)
+    out = resolve_path(cfg, "out_csv", output)
 
-    module = importlib.import_module(cfg["module"])
+    module = load_module(cfg)
     prepared, warnings = module.prepare(load_source(sims), load_source(side))
-    out.parent.mkdir(parents=True, exist_ok=True)
-    prepared.to_csv(out, sep=";", index=False)
+    write_csv(prepared, out, [sims, side])
 
     runs = prepared["simulationindex"].nunique()
     print(f"{len(prepared)} rows, {runs} runs, {prepared.shape[1]} columns "
           f"({cfg['module']}) -> {out}")
-    for warning in warnings:
-        print(f"  WARNING: {warning} is flown but absent from the airport table")
+    report_warnings(warnings)
     return out
 
 

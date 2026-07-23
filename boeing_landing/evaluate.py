@@ -155,16 +155,22 @@ def _per_run_regression(yhat, target, runs, labels: list[str]) -> dict:
 
     Args:
         yhat, target: predictions and truth, batched or flat.
-        runs: run id of every portion, in tensor order. The evaluation
-            dataloader keeps that order (shuffle=False) but drops the last
-            incomplete batch, so the ids are truncated to what was scored.
+        runs: run id of every portion, in tensor order -- the evaluation
+            dataloader keeps that order (shuffle=False) and now scores every
+            portion, so the two line up exactly.
         labels: command channel names.
     Returns:
         {run id: its _run_regression report}.
     """
     yhat = yhat.reshape(-1, *yhat.shape[-2:])
     target = target.reshape(-1, *target.shape[-2:])
-    runs = np.asarray(runs)[:len(yhat)]
+    runs = np.asarray(runs)
+    if len(runs) != len(yhat):
+        # said out loud: the portions lost are all at the end, hence all from
+        # the same run, which would be scored on a truncated subset in silence
+        print(f"  note: {len(runs) - len(yhat)} portions were not scored; "
+              f"the per-run table below is incomplete for the last run")
+        runs = runs[:len(yhat)]
     return {int(run): _run_regression(yhat, target, runs == run, labels)
             for run in np.unique(runs)}
 

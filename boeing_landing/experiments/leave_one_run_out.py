@@ -104,19 +104,24 @@ def enumerate_runs(config: dict) -> list[int]:
     return sorted(set(runs.tolist()))
 
 
-def _fold_r2(config: dict, ckpt: Path) -> float:
+def _fold_r2(ckpt: Path) -> float:
     """Score one fold on a scale-invariant metric, so arms that differ in
     norm_method stay comparable.
 
+    The config is re-read from the run directory, not taken from the caller:
+    only the archived one carries the I/O dimensions and the channel names the
+    model was built with, which is exactly what rebuilding it needs.
+
     Args:
-        config: that fold's config (it points at the fold's own npz).
-        ckpt: its trained checkpoint.
+        ckpt: the fold's trained checkpoint; its directory holds config.yaml.
     Returns:
         The mean R2 over the command channels on the held-out run; channels
         with a constant target (e.g. the dead 'directional') are skipped.
     """
     from boeing_landing.evaluate import _labels, _val_arrays, mean_r2
+    from utils.config import load_yaml
     from utils.evaluation import evaluate_arrays, regression_metrics
+    config = load_yaml(ckpt.parent / "config.yaml")
     inputs, outputs = _val_arrays(config)
     yhat, target, _ = evaluate_arrays(config, config["dataloader"], ckpt, inputs, outputs)
     return mean_r2(regression_metrics(yhat, target, _labels(config)))
@@ -229,9 +234,9 @@ def _fold(base: dict, source: Path, run: int, position: str, tag: str, seed: int
            "mean_r2": float("nan"), "run_dir": str(ckpt.parent)}
     if with_r2:
         try:
-            row["mean_r2"] = _fold_r2(cfg, ckpt)
+            row["mean_r2"] = _fold_r2(ckpt)
         except Exception as e:   # never let R2 kill the sweep
-            print(f"  (R2 skipped: {e})")
+            print(f"  (R2 skipped: {type(e).__name__}: {e})")
     return row
 
 

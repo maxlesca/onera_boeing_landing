@@ -129,9 +129,10 @@ class ConvCfC(nn.Module):
         x = x.view(batch_size, seq_len, *x.shape[1:])
         
         if timespans is not None:
-            timespans = timespans.view(batch_size, seq_len, -1)
-            if timespans.shape[-1] == 1:
-                timespans = timespans.expand(batch_size, seq_len, self.rnn.state_size)
+            # same reduction as TimespanCfC: the last frame of the window is the
+            # step the core takes, and ncps wants it broadcast to the state size
+            timespans = timespans.reshape(batch_size, seq_len, -1)[..., -1:]
+            timespans = timespans.expand(batch_size, seq_len, self.rnn.state_size)
 
         return self.rnn(x, hx, timespans)
 
@@ -174,13 +175,17 @@ class TimespanCfC(nn.Module):
             x: the inputs.
             hx: recurrent hidden state.
             timespans: per-frame dt, broadcast here to the core's state size.
+                Under the sequenced layout it arrives as (B, T, seq_len, 1);
+                only the last frame of the window is the step the core is about
+                to take, so the window is reduced to it before expanding --
+                forwarding (B, T, seq_len) raw would raise the very ncps size
+                error this wrapper exists to prevent.
         Returns:
             Whatever the wrapped module returns.
         """
         if timespans is not None and self.state_size:
-            timespans = timespans.reshape(x.size(0), x.size(1), -1)
-            if timespans.shape[-1] == 1:
-                timespans = timespans.expand(-1, -1, self.state_size)
+            timespans = timespans.reshape(x.size(0), x.size(1), -1)[..., -1:]
+            timespans = timespans.expand(-1, -1, self.state_size)
         return self.rnn(x, hx, timespans)
 
 

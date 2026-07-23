@@ -71,10 +71,17 @@ step expects one canonical `;`-separated csv. Write that translation as a module
 exposing
 
 ```python
-prepare(sims: DataFrame, side: DataFrame) -> (DataFrame, list_of_warnings)
+prepare(sims: DataFrame, side: DataFrame) -> (DataFrame, list_of_warning_strings)
 ```
 
-and declare it in the pipeline config:
+The warnings are finished sentences: only the delivery's own module knows what
+its check means, and `data/prepare.py` prints them as they come (`augment:`
+modules return their warnings the same way). Both dispatchers share
+`data/step.py` — config block, path resolution, overwrite guard, module import,
+csv write, warning printing — so a third kind of step is a call sequence, not a
+third copy.
+
+Declare the module in the pipeline config:
 
 ```yaml
 prepare:

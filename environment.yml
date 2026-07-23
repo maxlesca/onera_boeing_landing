@@ -12,7 +12,7 @@ channels:
   - conda-forge
 dependencies:
   - python=3.12
-  - make            # `make augment/dataset/train ...` (GNU make, conda-forge)
+  - make            # `make dataset/train/evaluate ...` (GNU make, conda-forge)
   - git-lfs         # LFS-tracked weights in the Yolo_models_LARD_V2 submodule
   - pip
   - pip:

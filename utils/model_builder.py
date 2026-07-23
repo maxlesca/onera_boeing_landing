@@ -29,6 +29,11 @@ WIDTH_VARIANTS = {
     "double": 2.0,
 }
 
+# The families backed by ncps, i.e. the only ones that read the timespans and
+# want them broadcast to the state size. The torch recurrent baselines
+# (gru/lstm/ctrnn/simplernn) take the argument and ignore it.
+NCPS_FAMILIES = {"cfc", "ltc", "ncp"}
+
 
 def scaled_int(value: int | None, scale: float, minimum: int = 1) -> int | None:
     """Scale one width/depth parameter.
@@ -243,6 +248,14 @@ def build_controller_network(config: dict, input_dim: int, output_dim: int) -> t
     if model_type in {"mlp", "ff_mlp", "nn"} and (mlp_cfg.get("value") or conv_cfg.get("value")):
         raise ValueError("Feedforward baselines currently do not support conv_block/mlp_block preprocessing.")
 
+    # sequencing produces a rank-4 tensor (batch, time, window, features), which
+    # only an encoder can consume: a bare recurrent core would take it straight
+    # into ncps and die there on a dimension count
+    if config.get("sequencing", {}).get("value", False) and not (
+            mlp_cfg.get("value", False) or conv_cfg.get("value", False)):
+        raise ValueError("sequencing.value=true needs an encoder in front of the recurrent "
+                         "core (conv_block or mlp_block); set it to false otherwise.")
+
     if mlp_cfg.get("value", False):
         mlp_layers = scaled_layers(mlp_cfg.get("no_layers", []), scale_factor, minimum=1)
         if not mlp_layers:
@@ -261,10 +274,21 @@ def build_controller_network(config: dict, input_dim: int, output_dim: int) -> t
     # A dataset that appends a per-frame dt channel feeds timespans to the
     # recurrent core, and ncps needs them expanded to its state size. ConvCfC
     # below does that itself; the other paths need the wrapper. Gated on the flag
-    # so networks built without a dt channel keep their exact state dict.
-    with_timespans = bool(config.get("dataset", {}).get("use_dt", False))
+    # so networks built without a dt channel keep their exact state dict, and on
+    # the ncps families: gru/lstm/ctrnn/simplernn ignore timespans entirely, so
+    # wrapping them would buy nothing and rename their parameters
+    # (model.gru.* -> model.rnn.gru.*), which no earlier checkpoint could reload.
+    with_timespans = (bool(config.get("dataset", {}).get("use_dt", False))
+                      and model_type in NCPS_FAMILIES)
 
     if mlp_cfg.get("value", False):
+        # the encoder is sized for ONE frame, so a window longer than one frame
+        # would reach it flattened (seq_len x features) and fail deep inside a
+        # Linear on a shape mismatch; say so here instead
+        if int(config.get("sequencing", {}).get("seq_len", 1)) > 1 and \
+                config.get("sequencing", {}).get("value", False):
+            raise ValueError("mlp_block reads one frame at a time: use sequencing.seq_len=1 "
+                             "(or the conv encoder, whose kernel is what consumes a window).")
         mlp = MLPCfC(
             no_input=input_dim,
             layer_sizes=scaled_layers(mlp_cfg["no_layers"], scale_factor, minimum=1),

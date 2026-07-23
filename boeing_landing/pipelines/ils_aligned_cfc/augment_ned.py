@@ -45,6 +45,7 @@ import pandas as pd
 
 from boeing_landing.data.geodesy import (approach_course, geodetic_to_ned,
                                          load_navdb, norm_qfu)
+from boeing_landing.data.step import report_warnings
 
 POI_COLUMNS = ["poi_latitude", "poi_longitude", "poi_altitude", "poi_course"]
 POS_COLUMNS = ["pos_along", "pos_cross", "pos_up"]
@@ -103,16 +104,18 @@ def augment(df: pd.DataFrame, navdb: dict) -> tuple[pd.DataFrame, list]:
         df: the raw frames, left untouched.
         navdb: the nav database (geodesy.load_navdb).
     Returns:
-        (augmented frame, missing) -- a copy of df carrying the 7 new columns,
-        and the (airport, runway, row count) triples absent from the database.
-        Their rows keep NaN: a run is reported, never silently dropped here.
+        (augmented frame, warnings) -- a copy of df carrying the 7 new columns,
+        and one message per (airport, runway) absent from the database. Their
+        rows keep NaN: a run is reported here, never silently dropped, and the
+        message says what it will cost. The wording belongs to this module: the
+        dispatcher prints whatever it is given.
     """
     groups = [(airport, runway, rows, navdb.get((airport.strip(), norm_qfu(runway))))
               for (airport, runway), rows in df.groupby(["airport", "runway"])]
     known = [_group_columns(rows, entry) for _, _, rows, entry in groups if entry is not None]
     columns = (pd.concat(known).reindex(df.index) if known
                else pd.DataFrame(np.nan, index=df.index, columns=POI_COLUMNS + POS_COLUMNS))
-    missing = [(airport, runway, len(rows))
+    missing = [f"{airport} {runway} not in the nav database ({len(rows)} rows left NaN)"
                for airport, runway, rows, entry in groups if entry is None]
     return df.assign(**{name: columns[name] for name in columns}), missing
 
@@ -122,7 +125,7 @@ def _report(df: pd.DataFrame, missing: list, out: Path) -> None:
 
     Args:
         df: the augmented frame.
-        missing: the triples augment returned.
+        missing: the warnings augment returned.
         out: where the csv was written.
     Returns:
         Nothing; a missing runway is a WARNING line, since its rows will be
@@ -130,9 +133,7 @@ def _report(df: pd.DataFrame, missing: list, out: Path) -> None:
     """
     done = df[POS_COLUMNS[0]].notna()
     print(f"{done.sum()}/{len(df)} rows augmented -> {out}")
-    for airport, runway, n in missing:
-        print(f"  WARNING: {airport} {runway} not in the nav database "
-              f"({n} rows left NaN)")
+    report_warnings(missing)
 
 
 def main() -> None:

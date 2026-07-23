@@ -45,13 +45,13 @@ Geodesy helpers are shared in `boeing_landing/data/geodesy.py` (over **pymap3d**
 only the declination-from-QFU and the spin `_declination_spin` are specific here.
 
 ```bash
-make augment CONFIG=magnetic_north_cfc RAW_CSV=datasets/ldg_dataset_images.csv   # raw -> augment.out_csv; RAW_CSV picks the source dataset
-make dataset CONFIG=magnetic_north_cfc   # reads augment.out_csv back, derived (no CSV= needed)
+make dataset CONFIG=magnetic_north_cfc   # runs the augmentation if its csv is missing, then builds the npz (FORCE=1 re-runs it)
 make train   CONFIG=magnetic_north_cfc   # uses the yaml's input_order (magnetic_north); ORDER=... only to override
 ```
 
-The augmentation to run and its output path come from this pipeline's `augment:`
-config block, so the single `make augment CONFIG=...` target serves every frame.
+The augmentation to run, its source and its output path all come from this
+pipeline's `augment:` config block, so one command builds the whole chain —
+same mechanism as `ils_aligned_cfc`.
 
 > Rows for any (airport, runway) missing from the NavDB keep NaN and are dropped
 > at dataset build, exactly like the runway frame.

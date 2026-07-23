@@ -31,7 +31,10 @@ def dataloader_from_arrays(inputs: np.ndarray, outputs: np.ndarray, loader_cfg: 
         loader_cfg: the config's dataloader section.
     Returns:
         A DataLoader with shuffle=False, so the portion order is preserved and
-        a score can still be attributed to the run it came from.
+        a score can still be attributed to the run it came from, and with
+        drop_last=False whatever the config says: an incomplete last batch is
+        a training concern, whereas dropping it here silently removes samples
+        from the score -- and they all belong to whichever run comes last.
     """
     dataset = DatasetController(inputs, outputs)
     return torch.utils.data.DataLoader(
@@ -39,7 +42,7 @@ def dataloader_from_arrays(inputs: np.ndarray, outputs: np.ndarray, loader_cfg: 
         batch_size=loader_cfg["batch_size"],
         num_workers=loader_cfg["num_workers"],
         pin_memory=loader_cfg["pin_memory"],
-        drop_last=loader_cfg["drop_last"],
+        drop_last=False,
         shuffle=False,
     )
 
