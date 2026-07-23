@@ -20,15 +20,16 @@ from pathlib import Path
 import lightning as L
 import numpy as np
 import torch
-from lightning.pytorch.callbacks import EarlyStopping, ModelCheckpoint
+from lightning.pytorch.callbacks import (EarlyStopping, LearningRateMonitor,
+                                         ModelCheckpoint)
 
 from boeing_landing.data.features import (CANONICAL_INPUTS, FEATURE_ORDERS, LABELS,
                                           extend_order)
 from boeing_landing.data.loader import load_portions
 from boeing_landing.config import load_pipeline_config
+from utils.scheduler import model_for, wants_schedule
 from utils.config import ensure_dir, save_yaml
 from utils.data import DatasetController, transform_to_sequence
-from utils.lightning import Lightning_Model
 from utils.model_builder import build_controller_network
 
 # Single source for the repo root and the default pipeline config; every
@@ -45,6 +46,14 @@ def _resolve_order(dataset_cfg: dict) -> list[str]:
     order = FEATURE_ORDERS.get(dataset_cfg.get("input_order", "grouped"), CANONICAL_INPUTS)
     names = np.load(dataset_cfg["train_npz"], allow_pickle=True)["input_names"]
     return extend_order(order, [str(n) for n in names])
+
+
+def _npz_labels(dataset_cfg: dict) -> list[str]:
+    """The command channels the npz was built with. The npz is the source of
+    truth (label_names travels with the data), so a pipeline that changed
+    build.label_set cannot be trained against a stale list."""
+    npz = np.load(dataset_cfg["train_npz"], allow_pickle=True)
+    return [str(n) for n in npz["label_names"]] if "label_names" in npz else list(LABELS)
 
 
 def _sequence(x, y, seq_len: int):
@@ -87,7 +96,7 @@ def _inject_labels(config: dict) -> None:
     if config["dataset"].get("use_dt", False):
         labels.append("dt")
     config["dataset"]["input_labels"] = labels
-    config["dataset"]["output_labels"] = LABELS
+    config["dataset"]["output_labels"] = _npz_labels(config["dataset"])
 
 
 def _run_dir(project_root: Path, config: dict) -> Path:
@@ -110,7 +119,7 @@ def assemble(config: dict):
     config["dataset"]["input_dim"] = config["dataset"]["input_size"] = input_dim
     config["dataset"]["output_dim"] = config["dataset"]["output_size"] = output_dim
     network = build_controller_network(config, input_dim, output_dim)
-    return Lightning_Model(network, config), train_loader, val_loader
+    return model_for(config, network), train_loader, val_loader
 
 
 class GradNorm(L.Callback):
@@ -138,6 +147,10 @@ def _callbacks(config: dict, run_dir: Path):
                                  filename="{epoch:02d}_{val_loss:.6f}",
                                  save_top_k=1, mode="min")
     cbs = [checkpoint, GradNorm(), EpochTimer()]
+    # only when a schedule is on: with a constant lr the logged curve is a flat
+    # line that says nothing, and metrics.csv stays comparable to older runs
+    if wants_schedule(config):
+        cbs.append(LearningRateMonitor(logging_interval="epoch"))
     patience = int(config["training"].get("early_stopping_patience", 0))
     if patience > 0:
         cbs.append(EarlyStopping(monitor="val_loss", patience=patience, mode="min"))
