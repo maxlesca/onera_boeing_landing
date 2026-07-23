@@ -1,0 +1,14 @@
+# Same recipe as base.yaml with a cosine learning-rate schedule: fast at the
+# start, progressively finer, decaying from lr down to min_lr over max_epochs.
+# Cosine rather than plateau for a comparison: it depends only on the epoch
+# count, so two arms sharing max_epochs follow the exact same lr curve, and any
+# difference between them comes from the architecture and not from the schedule
+# having reacted differently to each run.
+
+extends: base.yaml
+
+training:
+  scheduler:
+    type: cosine
+    min_lr: 1.0e-5
+    warmup_epochs: 0

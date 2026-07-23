@@ -1,0 +1,140 @@
+# ned_wind_cfc: the 85-run / 8-airport delivery, state -> CfC, no encoder.
+#
+# Inputs (20 + dt): local NED position AS DELIVERED, attitude, body rates, body
+# velocity, wind (linear + rotational gusts), weight-on-wheels. No GPS, no NED
+# velocity, no ILS, and no frame conversion of any kind.
+# Labels: the 8 command channels.
+# Channel for channel this is Tudor's quadrotor input set, with the wind playing
+# the role of his M_ext external disturbance (see DOC 8.19.5).
+#
+#   make dataset CONFIG=ned_wind_cfc   # the two raw csv -> csv -> npz, in one go
+#   make train   CONFIG=ned_wind_cfc   # arm 0; then /mlp_encoder and /conv
+# Paths are relative to the repo root (run from onera_boeing_landing/).
+
+training:
+  max_epochs: 20
+  lr: 0.001
+  seed: 42
+  logger: false
+  accelerator: auto          # auto | cpu | gpu
+  devices: 1
+  precision: 32              # 32 | 16-mixed (GPU only)
+  # portions are 500 steps long: BPTT is 4x deeper than the previous pipelines,
+  # so gradient clipping stops being optional
+  gradient_clip_val: 1.0
+  early_stopping_patience: 0 # >0 stops after N epochs without val improvement; 0 = off
+  log_every_n_steps: 1       # write metrics.csv every n steps; 0 = no logging at all
+  # learning-rate schedule (utils/scheduler.py). `none` = constant lr,
+  # the default, so this pipeline stays comparable to every earlier result.
+  # Move fast early, refine late: use the cosine.yaml variant.
+  scheduler:
+    type: none               # none | cosine | plateau | step
+
+# raw delivery -> canonical csv, run by `make dataset`. Only renames columns and checks
+# the runways against the airport table; no value is ever recomputed.
+prepare:
+  module: boeing_landing.pipelines.ned_wind_cfc.prepare
+  sims_csv: datasets/all_simulations_complete_with_wind_004s_NED_corrected.csv
+  side_csv: datasets/airports_info_complete.csv
+  out_csv: datasets/ned_wind.csv
+
+# npz build step (make dataset). Reads prepare.out_csv, so no CSV= is needed.
+build:
+  input_set: ned_wind        # features.INPUT_SETS -- position used as delivered
+  label_set: commands_full   # the 8 command channels (features.LABEL_SETS)
+  out_dir: datasets/ned_wind_cfc     # inside the repo, gitignored
+  # min-max on the TRAIN runs only, as delivered: no fixed physical envelope.
+  physical_bounds: false
+  norm_method: minmax
+
+  # --- phase 1 split -----------------------------------------------------
+  # 30 training runs, 3 to 4 per airport so no single geometry dominates. The
+  # other 52 runs of the delivery stay unused on purpose: phase 1 buys iteration
+  # speed, phase 2 (repeated random holdout) uses everything.
+  train_runs: [2, 8, 11, 16,             # ZBTJ
+               34, 36, 39, 41,           # MSLP
+               54, 55, 57, 60,           # YPAD
+               82, 83, 88, 105,          # WMKK
+               130, 131, 133, 134,       # SBGR
+               162, 164, 167,            # VHHH
+               177, 179, 183, 185,       # MMMX
+               209, 211, 217]            # VVTS
+  # Three held-out runs, each picked for a different reason. Averaging them into
+  # one number would destroy the point: alone, a bad score cannot tell "does not
+  # extrapolate" from "has not converged"; side by side, it can.
+  #   172 (VHHH 07R) crosswind +9.97 m/s -- the strongest of the 85, the run-7 analogue
+  #    98 (WMKK 14R) headwind -14.76 m/s -- the strongest of the 85
+  #   226 (VVTS 25L) median wind         -- the easy control
+  # `make data-report` reports how much of each run falls outside [0,1] after
+  # normalisation: that is the check that 172 really is an extrapolation test.
+  val_runs: [172, 98, 226]
+
+# run evaluation (make evaluate). Metrics are reported per validation run.
+evaluation:
+  ablation: true             # mask each feature group and re-evaluate
+  fill_value: 0.0            # value written into masked channels
+
+experiments:
+  seeds: [42, 43, 44]        # convergence study: same config, several inits
+
+dataset:
+  train_npz: datasets/ned_wind_cfc/landing_train.npz
+  val_npz: datasets/ned_wind_cfc/landing_val.npz
+  # 500 steps = 20 s. Epoch cost is T x (portion_len / stride), so at a constant
+  # overlap ratio a longer portion is FREE. 20 s is what lets the CfC actually
+  # use its dynamics (a 5 s window is mostly warm-up from a zero state) and
+  # covers the physical time scales -- flare 5-10 s, phugoid 30-60 s.
+  portion_len: 500
+  stride: 100
+  input_order: ned_wind    # channel order (features.FEATURE_ORDERS)
+  use_dt: true             # per-frame dt -> CfC timespans
+  normalized: true
+  with_noise: false
+  with_bias: false
+  with_delay: false
+  delay_steps: 2
+
+# --- the encoder in front of the CfC ------------------------------------------
+# Default: none. The CfC already has its own backbone (128 units), the state is
+# 20 heterogeneous physical channels with no spatial structure to convolve over,
+# and on Tudor's own quadrotor the conv block made the CfC 2.3x WORSE
+# (val_loss 0.000326 vs 0.000142). Arms 1 and 2 are mlp_encoder.yaml and conv.yaml.
+mlp_block:
+  value: false
+  no_layers: [64, 64]
+conv_block:
+  value: false
+  output_dim: 64
+
+# The conv path needs sequencing; without it the CfC reads the portion directly.
+sequencing:
+  value: false
+  seq_len: 1
+
+dataloader:
+  batch_size: 32
+  num_workers: 0         # Windows: 0 avoids worker spawn issues (baseline used 8)
+  pin_memory: false
+  drop_last: true
+
+model:
+  type: cfc
+  no_neurons_layer: 64
+  ode_unfolds: 6         # LTC only (inert for cfc)
+  cfc_mode: default
+  ncp:                   # NCP only (inert for cfc)
+    inter_neurons: 32
+    command_neurons: 24
+    sensory_fanout: 20
+    inter_fanout: 16
+    recurrent_command_synapses: 16
+    motor_fanin: 20
+  backbone_units: 128
+  backbone_layers: 1
+  backbone_dropout: 0.0  # ncps ignores this unless backbone_layers >= 2
+  activation: lecun_tanh
+  mixed_memory: false
+  scale_factor: 1.0
+  hidden_layers: [120, 120, 120]  # MLP only (inert for cfc)
+
+checkpoint_name: ned_wind_cfc
