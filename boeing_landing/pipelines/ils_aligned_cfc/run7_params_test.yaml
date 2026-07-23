@@ -13,9 +13,6 @@ dataset:
   stride: 12             # Plus de chevauchement pour multiplier les exemples
   with_noise: true       # Crucial pour la robustesse en Behavior Cloning
 
-sequencing:
-  seq_len: 5             # Fenêtre glissante pour le Conv1D
-
 model:
   no_neurons_layer: 128  # Plus de capacité
   backbone_units: 128
