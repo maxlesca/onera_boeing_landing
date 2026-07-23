@@ -16,16 +16,43 @@ from boeing_landing.data.features import FEATURE_ORDERS
 from boeing_landing.train import DEFAULT_CONFIG, PROJECT_ROOT, train, val_loss_from_checkpoint
 
 
+def _train_order(config_path: Path, project_root: Path, order: str) -> tuple[float, Path]:
+    """Train one arm of the sweep.
+
+    Args:
+        config_path: the pipeline config, used unchanged apart from the order.
+        project_root: repo root holding runs/.
+        order: the channel order this arm tests.
+    Returns:
+        (best val_loss, run dir).
+    """
+    print(f"\n=== order: {order} ===")
+    ckpt = train(config_path, project_root, input_order=order)
+    return val_loss_from_checkpoint(ckpt), ckpt.parent
+
+
 def sweep(config_path: Path, project_root: Path) -> dict[str, tuple[float, Path]]:
-    scores = {}
-    for order in FEATURE_ORDERS:
-        print(f"\n=== order: {order} ===")
-        ckpt = train(config_path, project_root, input_order=order)
-        scores[order] = (val_loss_from_checkpoint(ckpt), ckpt.parent)
-    return scores
+    """Train one run per named channel order.
+
+    Args:
+        config_path: the pipeline config to sweep.
+        project_root: repo root holding runs/.
+    Returns:
+        {order: (best val_loss, run dir)} -- every order in FEATURE_ORDERS,
+        each in its own run dir.
+    """
+    return {order: _train_order(config_path, project_root, order)
+            for order in FEATURE_ORDERS}
 
 
 def report(scores: dict[str, tuple[float, Path]]) -> None:
+    """Print the ranking.
+
+    Args:
+        scores: what sweep returned.
+    Returns:
+        Nothing.
+    """
     print("\n=== conv channel order vs val_loss (best first) ===")
     for order, (loss, _) in sorted(scores.items(), key=lambda kv: kv[1][0]):
         print(f"  {order:12s} {loss:.6f}")
@@ -33,6 +60,11 @@ def report(scores: dict[str, tuple[float, Path]]) -> None:
 
 
 def main() -> None:
+    """CLI entrypoint: sweep the orders of the --config pipeline.
+
+    Returns:
+        Nothing; trains every arm, then prints the ranking.
+    """
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--config", type=Path, default=DEFAULT_CONFIG)
     a = ap.parse_args()

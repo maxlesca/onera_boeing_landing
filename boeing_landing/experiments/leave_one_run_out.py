@@ -53,7 +53,14 @@ from boeing_landing.train import (DEFAULT_CONFIG, PROJECT_ROOT, train_config,
 
 
 def _parse_physical_bounds(value: str):
-    """CLI string -> the value build_dataset expects (False/True/'core'/'all')."""
+    """Translate the CLI's string into what build_dataset expects.
+
+    Args:
+        value: the --physical-bounds argument.
+    Returns:
+        False for the off spellings, True for the core ones, else the string
+        itself ('all' being the only other tier).
+    """
     low = value.strip().lower()
     if low in {"false", "0", "none", "off"}:
         return False
@@ -63,14 +70,30 @@ def _parse_physical_bounds(value: str):
 
 
 def _safe_tag(tag: str) -> str:
+    """Make an arm name usable as a directory name.
+
+    Args:
+        tag: the arm name, possibly holding '=' or '/' from a CLI override.
+    Returns:
+        It with everything but letters, digits, '-', '_' and '.' replaced by
+        '_'.
+    """
     return "".join(c if c.isalnum() or c in "-_." else "_" for c in tag)
 
 
 def enumerate_runs(config: dict) -> list[int]:
-    """The runs that survived cleaning, read from the dataset the config points
-    at (train + val pooled). Enumerating from the built npz -- not the raw csv --
-    means runs fully dropped at build (e.g. missing NavDB) are excluded, so every
-    fold has a non-empty validation set."""
+    """The runs to hold out one by one.
+
+    Args:
+        config: the pipeline config, read for the dataset it points at.
+    Returns:
+        The sorted runs that survived cleaning, train and val pooled. Reading
+        the built npz rather than the raw csv is what excludes runs dropped at
+        build (e.g. missing from the NavDB), so no fold gets an empty
+        validation set.
+    Raises:
+        SystemExit: that dataset has not been built yet.
+    """
     d = config["dataset"]
     tr, va = PROJECT_ROOT / d["train_npz"], PROJECT_ROOT / d["val_npz"]
     if not tr.exists() or not va.exists():
@@ -82,9 +105,16 @@ def enumerate_runs(config: dict) -> list[int]:
 
 
 def _fold_r2(config: dict, ckpt: Path) -> float:
-    """Mean R2 over the command channels on the held-out run (scale-invariant, so
-    comparable across normalisation methods). NaN channels (constant target, e.g.
-    the dead 'directional') are skipped."""
+    """Score one fold on a scale-invariant metric, so arms that differ in
+    norm_method stay comparable.
+
+    Args:
+        config: that fold's config (it points at the fold's own npz).
+        ckpt: its trained checkpoint.
+    Returns:
+        The mean R2 over the command channels on the held-out run; channels
+        with a constant target (e.g. the dead 'directional') are skipped.
+    """
     from boeing_landing.evaluate import _labels, _val_arrays, mean_r2
     from utils.evaluation import evaluate_arrays, regression_metrics
     inputs, outputs = _val_arrays(config)
@@ -93,9 +123,16 @@ def _fold_r2(config: dict, ckpt: Path) -> float:
 
 
 def _fold_train_runs(config: dict, held_out: int) -> set[int] | None:
-    """The runs one fold trains on: the population the config declares
-    (build.train_runs + build.val_runs) minus the held-out one, or None when it
-    declares none -- the fold then takes every run of the csv, as before."""
+    """The runs one fold trains on -- the population the config declares, so a
+    fold scores the configured recipe and not a bigger one.
+
+    Args:
+        config: the pipeline config (build.train_runs + build.val_runs).
+        held_out: the run this fold validates on.
+    Returns:
+        That population minus the held-out run, or None when the config
+        declares none -- the fold then takes every run of the csv.
+    """
     b = config.get("build", {})
     declared = {int(r) for r in b.get("train_runs") or []}
     if not declared:
@@ -105,9 +142,22 @@ def _fold_train_runs(config: dict, held_out: int) -> set[int] | None:
 
 def _build_fold(source: Path, run: int, out_dir: Path, config: dict,
                 physical_bounds, norm_method: str, reuse: bool) -> None:
-    """Rebuild the npz with `run` held out, bounds fit on the other runs only.
-    Every build knob comes from the config, so a fold is the pipeline's own recipe
-    with a different split -- never a partly defaulted one."""
+    """Rebuild the npz with one run held out, its bounds fit on the other runs
+    only -- the held-out run never leaks into the normalisation.
+
+    Args:
+        source: the csv every fold is cut from.
+        run: the run to hold out.
+        out_dir: this fold's dataset directory.
+        config: the pipeline config; every build knob comes from it, so a fold
+            is the pipeline's own recipe with a different split, never a partly
+            defaulted one.
+        physical_bounds, norm_method: the arm's normalisation levers, which the
+            CLI may override.
+        reuse: skip the rebuild when both npz are already there.
+    Returns:
+        Nothing; writes the fold's npz.
+    """
     if reuse and (out_dir / "landing_train.npz").exists() and (out_dir / "landing_val.npz").exists():
         print(f"  reuse existing {out_dir}")
         return
@@ -120,58 +170,137 @@ def _build_fold(source: Path, run: int, out_dir: Path, config: dict,
                         train_runs=_fold_train_runs(config, run))
 
 
+def _fold_config(base: dict, tag: str, run: int, seed: int, fold_dir: Path,
+                 max_epochs: int | None) -> dict:
+    """The config one fold trains with.
+
+    Args:
+        base: the pipeline config, left untouched.
+        tag: the arm name, which names the run folder.
+        run: the held-out run.
+        seed: the same seed on every fold and every arm, so a difference is
+            attributable to the held-out run or the recipe, not to the init.
+        fold_dir: this fold's dataset directory.
+        max_epochs: epoch override for a quick trial, None to keep the config's.
+    Returns:
+        A deep copy pointed at the fold's npz and tagged runs/loro_<tag>/run<n>/.
+    """
+    cfg = deepcopy(base)
+    cfg["training"]["seed"] = seed
+    if max_epochs:
+        cfg["training"]["max_epochs"] = max_epochs
+    cfg["checkpoint_name"] = f"loro_{tag}"
+    cfg["run_tag"] = f"run{run}"
+    rel = fold_dir.relative_to(PROJECT_ROOT).as_posix()
+    cfg["dataset"]["train_npz"] = f"{rel}/landing_train.npz"
+    cfg["dataset"]["val_npz"] = f"{rel}/landing_val.npz"
+    return cfg
+
+
+def _fold(base: dict, source: Path, run: int, position: str, tag: str, seed: int,
+          physical_bounds, norm_method: str, with_r2: bool, reuse_data: bool,
+          max_epochs: int | None) -> dict:
+    """Run one fold end to end: build, train, score.
+
+    Args:
+        base: the pipeline config.
+        source: the csv every fold is cut from.
+        run: the run held out here.
+        position: progress marker printed in the header, e.g. '3/31'.
+        tag: the arm name.
+        seed: the seed shared by every fold.
+        physical_bounds, norm_method: the arm's normalisation levers.
+        with_r2: also run the inference pass that yields the mean R2.
+        reuse_data: reuse an existing fold dataset instead of rebuilding it.
+        max_epochs: epoch override for a quick trial.
+    Returns:
+        That fold's result row: run, validation frames, val_loss, mean R2 (NaN
+        when skipped) and run dir.
+    """
+    print(f"\n=== fold: hold out run {run} ({position}) ===")
+    fold_dir = PROJECT_ROOT / "datasets" / "loro" / tag / f"run{run}"
+    _build_fold(source, run, fold_dir, base, physical_bounds, norm_method, reuse_data)
+
+    cfg = _fold_config(base, tag, run, seed, fold_dir, max_epochs)
+    ckpt = train_config(cfg, PROJECT_ROOT)
+    row = {"run": run,
+           "val_frames": int(np.load(fold_dir / "landing_val.npz", allow_pickle=True)["run"].size),
+           "val_loss": val_loss_from_checkpoint(ckpt),
+           "mean_r2": float("nan"), "run_dir": str(ckpt.parent)}
+    if with_r2:
+        try:
+            row["mean_r2"] = _fold_r2(cfg, ckpt)
+        except Exception as e:   # never let R2 kill the sweep
+            print(f"  (R2 skipped: {e})")
+    return row
+
+
 def sweep(config_path: Path, tag: str, physical_bounds, norm_method: str,
           seed: int, with_r2: bool, reuse_data: bool,
           runs: list[int] | None, max_epochs: int | None) -> dict:
-    """Train one fold per run; return the arm's results dict."""
+    """Train one fold per run: the whole arm.
+
+    Args:
+        config_path: the pipeline config being scored.
+        tag: the arm name (dataset folders, run folders, results.json).
+        physical_bounds, norm_method: the arm's normalisation levers.
+        seed: the seed shared by every fold and every arm.
+        with_r2: also compute the mean R2 of each fold.
+        reuse_data: reuse existing fold datasets.
+        runs: restrict the folds to these runs; None holds out every run of the
+            built dataset.
+        max_epochs: epoch override for a quick trial.
+    Returns:
+        The arm's results dict: its levers, one row per fold, and the summary.
+    """
     base = load_pipeline_config(config_path)
     source = build_dataset._resolve_source(None, base)
     all_runs = runs or enumerate_runs(base)
-    data_root = PROJECT_ROOT / "datasets" / "loro" / tag
-
-    rows = []
-    for run in all_runs:
-        print(f"\n=== fold: hold out run {run} ({all_runs.index(run)+1}/{len(all_runs)}) ===")
-        fold_dir = data_root / f"run{run}"
-        _build_fold(source, run, fold_dir, base, physical_bounds, norm_method, reuse_data)
-
-        cfg = deepcopy(base)
-        cfg["training"]["seed"] = seed
-        if max_epochs:
-            cfg["training"]["max_epochs"] = max_epochs
-        cfg["checkpoint_name"] = f"loro_{tag}"
-        cfg["run_tag"] = f"run{run}"
-        rel = fold_dir.relative_to(PROJECT_ROOT).as_posix()
-        cfg["dataset"]["train_npz"] = f"{rel}/landing_train.npz"
-        cfg["dataset"]["val_npz"] = f"{rel}/landing_val.npz"
-
-        ckpt = train_config(cfg, PROJECT_ROOT)
-        val_frames = int(np.load(fold_dir / "landing_val.npz", allow_pickle=True)["run"].size)
-        row = {"run": run, "val_frames": val_frames,
-               "val_loss": val_loss_from_checkpoint(ckpt),
-               "mean_r2": float("nan"), "run_dir": str(ckpt.parent)}
-        if with_r2:
-            try:
-                row["mean_r2"] = _fold_r2(cfg, ckpt)
-            except Exception as e:   # never let R2 kill the sweep
-                print(f"  (R2 skipped: {e})")
-        rows.append(row)
-
+    rows = [_fold(base, source, run, f"{i}/{len(all_runs)}", tag, seed,
+                  physical_bounds, norm_method, with_r2, reuse_data, max_epochs)
+            for i, run in enumerate(all_runs, 1)]
     return {"tag": tag, "config": str(config_path), "seed": seed,
             "physical_bounds": physical_bounds, "norm_method": norm_method,
             "runs": rows, "summary": _summary(rows)}
 
 
+def _mean_std(values: list[float]) -> tuple[float, float]:
+    """Mean and spread of the finite scores.
+
+    Args:
+        values: the scores kept.
+    Returns:
+        (mean, standard deviation); (NaN, 0) on an empty list and a 0 spread on
+        a single value.
+    """
+    if not values:
+        return float("nan"), 0.0
+    return statistics.mean(values), statistics.stdev(values) if len(values) > 1 else 0.0
+
+
 def _summary(rows: list[dict]) -> dict:
-    losses = [r["val_loss"] for r in rows if math.isfinite(r["val_loss"])]
-    r2s = [r["mean_r2"] for r in rows if math.isfinite(r["mean_r2"])]
-    def ms(xs):
-        return (statistics.mean(xs), statistics.stdev(xs) if len(xs) > 1 else 0.0) if xs else (float("nan"), 0.0)
-    lm, ls = ms(losses); rm, rs = ms(r2s)
-    return {"val_loss_mean": lm, "val_loss_std": ls, "mean_r2_mean": rm, "mean_r2_std": rs}
+    """Aggregate the folds into the arm's score.
+
+    Args:
+        rows: the fold rows sweep collected; NaN scores are dropped, so a fold
+            whose R2 was skipped does not poison the mean.
+    Returns:
+        Mean and std of val_loss and of mean_r2.
+    """
+    loss_mean, loss_std = _mean_std([r["val_loss"] for r in rows if math.isfinite(r["val_loss"])])
+    r2_mean, r2_std = _mean_std([r["mean_r2"] for r in rows if math.isfinite(r["mean_r2"])])
+    return {"val_loss_mean": loss_mean, "val_loss_std": loss_std,
+            "mean_r2_mean": r2_mean, "mean_r2_std": r2_std}
 
 
 def report(res: dict) -> None:
+    """Print an arm's folds, hardest first, and its summary.
+
+    Args:
+        res: what sweep returned (or a results.json read back).
+    Returns:
+        Nothing.
+    """
     print(f"\n=== leave-one-run-out :: {res['tag']} "
           f"(pb={res['physical_bounds']}, norm={res['norm_method']}, seed={res['seed']}) ===")
     print(f"{'run':>4} {'frames':>7} {'val_loss':>10} {'mean_r2':>9}")
@@ -184,6 +313,13 @@ def report(res: dict) -> None:
 
 
 def save_results(res: dict) -> Path:
+    """Archive an arm so it can be re-read and compared without retraining.
+
+    Args:
+        res: what sweep returned.
+    Returns:
+        Path of the written runs/loro/<tag>/results.json.
+    """
     out = PROJECT_ROOT / "runs" / "loro" / res["tag"] / "results.json"
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(json.dumps(res, indent=2))
@@ -192,6 +328,14 @@ def save_results(res: dict) -> Path:
 
 
 def figure_single(res: dict, save: bool) -> None:
+    """Draw one arm: val_loss and mean R2 per held-out run.
+
+    Args:
+        res: what sweep returned (or a results.json read back).
+        save: write a PNG instead of showing the window.
+    Returns:
+        Nothing.
+    """
     import matplotlib
     if save:
         matplotlib.use("Agg")
@@ -214,13 +358,32 @@ def figure_single(res: dict, save: bool) -> None:
     _show_or_save(fig, f"loro_{res['tag']}", save)
 
 
+def _by_run(arm: dict) -> dict:
+    """Index one arm's folds by held-out run.
+
+    Args:
+        arm: a results dict.
+    Returns:
+        {run: its fold row}, so arms can be aligned run by run even when they
+        did not cover exactly the same runs.
+    """
+    return {r["run"]: r for r in arm["runs"]}
+
+
 def compare(paths: list[Path], save: bool) -> None:
-    """Side-by-side of finished arms, aligned by run: delta table + grouped bars."""
+    """Put finished arms side by side, aligned by run: delta table and grouped
+    bars. No training -- everything comes from the saved results.
+
+    Args:
+        paths: the results.json of each arm; the first is the reference the
+            deltas are taken against.
+        save: write a PNG instead of showing the window.
+    Returns:
+        Nothing.
+    """
     arms = [json.loads(Path(p).read_text()) for p in paths]
     runs = sorted({r["run"] for a in arms for r in a["runs"]})
-    def by_run(a):
-        return {r["run"]: r for r in a["runs"]}
-    maps = [by_run(a) for a in arms]
+    maps = [_by_run(a) for a in arms]
 
     print("\n=== LORO comparison (val_loss | mean_r2) ===")
     header = "run   " + "  ".join(f"{a['tag'][:16]:>16}" for a in arms)
@@ -257,6 +420,16 @@ def compare(paths: list[Path], save: bool) -> None:
 
 
 def _show_or_save(fig, stem: str, save: bool) -> None:
+    """Deliver a figure the way the machine allows.
+
+    Args:
+        fig: the matplotlib figure.
+        stem: file name without extension, used when saving.
+        save: True writes figures/loro/<stem>.png, False opens a window.
+    Returns:
+        Nothing; on a headless machine without --save it says so instead of
+        failing -- the table and results.json already carry everything.
+    """
     if save:
         from utils.config import ensure_dir
         out = ensure_dir(PROJECT_ROOT / "figures" / "loro") / f"{stem}.png"
@@ -271,6 +444,11 @@ def _show_or_save(fig, stem: str, save: bool) -> None:
 
 
 def main() -> None:
+    """CLI entrypoint: run an arm, or re-render finished ones with --compare.
+
+    Returns:
+        Nothing; an arm prints its table, writes results.json and its figure.
+    """
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--config", type=Path, default=DEFAULT_CONFIG)
     ap.add_argument("--physical-bounds", default=None,

@@ -23,7 +23,15 @@ import pandas as pd
 
 
 def _metrics_frame(run_dir: Path) -> pd.DataFrame:
-    """Lightning's metrics.csv of a run (latest version) as a DataFrame."""
+    """Read a run's training curves.
+
+    Args:
+        run_dir: the run directory.
+    Returns:
+        Lightning's metrics.csv (latest version subfolder) as a DataFrame.
+    Raises:
+        SystemExit: the run has none, i.e. it trained with logging off.
+    """
     candidates = sorted(run_dir.glob("lightning_logs/version_*/metrics.csv"))
     if not candidates:
         raise SystemExit(f"no metrics.csv under {run_dir}")
@@ -31,19 +39,39 @@ def _metrics_frame(run_dir: Path) -> pd.DataFrame:
 
 
 def _run_label(run_dir: Path) -> str:
-    """Readable legend label: <pipeline>/<variant>/<timestamp>."""
+    """Legend label of one run.
+
+    Args:
+        run_dir: the run directory.
+    Returns:
+        '<pipeline>/<variant>/<timestamp>'.
+    """
     return "/".join(run_dir.parts[-3:])
 
 
 def _variant_label(run_dir: Path) -> str:
-    """<pipeline>/<variant> -- identifies a run without its timestamp."""
+    """Legend label of one variant.
+
+    Args:
+        run_dir: the run directory.
+    Returns:
+        '<pipeline>/<variant>' -- identifies a run without its timestamp, which
+        is what a sweep chart needs.
+    """
     return f"{run_dir.parent.parent.name}/{run_dir.parent.name}"
 
 
 def _mean_predictor_mse(run_dir: Path) -> tuple[list[str], np.ndarray] | None:
-    """Per-command MSE of the naive baseline that always outputs the train-mean
-    command, computed from the run's own dataset (paths in its saved config).
-    Roughly the val-label variance. None if the npz files are missing."""
+    """The naive baseline every curve is read against: always output the
+    train-mean command. Roughly the val-label variance.
+
+    Args:
+        run_dir: the run directory; the dataset comes from its saved config, so
+            the baseline is computed on the very data the run was trained on.
+    Returns:
+        (command names, per-command MSE), or None when the npz are missing --
+        both normalised with the train bounds, as at training time.
+    """
     from boeing_landing.train import PROJECT_ROOT
     from utils.config import load_yaml
 
@@ -59,14 +87,31 @@ def _mean_predictor_mse(run_dir: Path) -> tuple[list[str], np.ndarray] | None:
 
 
 def _mean_predictor_loss(run_dir: Path) -> float | None:
-    """The same baseline as a single val_loss number (mean over the commands).
-    A model is only learning when it sits clearly below this."""
+    """The same baseline as a single number.
+
+    Args:
+        run_dir: the run directory.
+    Returns:
+        Its mean over the commands, comparable to val_loss -- a model is only
+        learning when it sits clearly below this -- or None if it cannot be
+        computed.
+    """
     per_command = _mean_predictor_mse(run_dir)
     return float(per_command[1].mean()) if per_command else None
 
 
 def _draw_mean_baseline(run_dir: Path, ax, axis: str = "y") -> bool:
-    """Dotted line at the predict-the-mean val_loss; False if it can't be computed."""
+    """Draw the predict-the-mean reference line.
+
+    Args:
+        run_dir: the run whose dataset defines it.
+        ax: axes to draw on.
+        axis: 'y' for a horizontal line (loss curves), anything else for a
+            vertical one (bar charts).
+    Returns:
+        True when the line was drawn, False when the baseline is unavailable --
+        the caller uses it to decide whether a legend is worth showing.
+    """
     base = _mean_predictor_loss(run_dir)
     if base is None:
         return False
@@ -76,7 +121,14 @@ def _draw_mean_baseline(run_dir: Path, ax, axis: str = "y") -> bool:
 
 
 def plot_run(run_dir: Path, ax) -> None:
-    """Train and val loss curves of a single run."""
+    """Draw one run's train and val loss curves, with the baseline line.
+
+    Args:
+        run_dir: the run directory.
+        ax: axes to draw on.
+    Returns:
+        Nothing.
+    """
     df = _metrics_frame(run_dir)
     for col, style in [("train_loss", "-"), ("val_loss", "o-")]:
         if col in df:
@@ -87,7 +139,15 @@ def plot_run(run_dir: Path, ax) -> None:
 
 
 def plot_comparison(run_dirs: list[Path], ax) -> None:
-    """val_loss of several runs overlaid."""
+    """Overlay the val_loss curves of several runs.
+
+    Args:
+        run_dirs: the runs to compare; the first one's dataset provides the
+            baseline line.
+        ax: axes to draw on.
+    Returns:
+        Nothing.
+    """
     for run_dir in run_dirs:
         df = _metrics_frame(run_dir)
         points = df.dropna(subset=["val_loss"])
@@ -97,7 +157,14 @@ def plot_comparison(run_dirs: list[Path], ax) -> None:
 
 
 def _model_per_command_mse(run_dir: Path) -> dict[str, float] | None:
-    """{command: model mse} from the run's evaluation.json; None if not evaluated."""
+    """The model's own per-command scores.
+
+    Args:
+        run_dir: the run directory.
+    Returns:
+        {command: mse} from its evaluation.json, or None when the run has not
+        been evaluated (make evaluate writes that file).
+    """
     path = run_dir / "evaluation.json"
     if not path.exists():
         return None
@@ -106,9 +173,16 @@ def _model_per_command_mse(run_dir: Path) -> dict[str, float] | None:
 
 
 def plot_per_command(run_dir: Path, ax) -> None:
-    """Per-command MSE of the model next to the predict-the-mean baseline
-    (~ val-label variance): a command is only learned when its model bar sits
-    below the baseline bar. The global val_loss hides these differences."""
+    """Draw the model's per-command MSE next to the predict-the-mean baseline
+    (~ the val-label variance): a command is only learned when its model bar
+    sits below the baseline bar, a difference the global val_loss hides.
+
+    Args:
+        run_dir: the run directory; it must have been evaluated.
+        ax: axes to draw on.
+    Returns:
+        Nothing.
+    """
     labels, base = _mean_predictor_mse(run_dir)
     model = _model_per_command_mse(run_dir)
     pos = np.arange(len(labels))
@@ -122,7 +196,14 @@ def plot_per_command(run_dir: Path, ax) -> None:
 
 
 def _ablation_deltas(run_dir: Path) -> tuple[float, dict[str, float]] | None:
-    """(baseline mse, {group: delta-mse}) from evaluation.json; None if absent."""
+    """What each feature group is worth to the model.
+
+    Args:
+        run_dir: the run directory.
+    Returns:
+        (baseline mse, {group: mse increase when masked}) from its
+        evaluation.json, or None when the run has no ablation results.
+    """
     path = run_dir / "evaluation.json"
     if not path.exists():
         return None
@@ -134,7 +215,17 @@ def _ablation_deltas(run_dir: Path) -> tuple[float, dict[str, float]] | None:
 
 
 def plot_ablation(run_dir: Path, ax, noise: float = 0.0) -> None:
-    """Sorted delta-MSE bars: how much the model loses when a group is masked."""
+    """Draw the sorted delta-MSE bars: how much the model loses when a group is
+    masked.
+
+    Args:
+        run_dir: the run directory; it must have been evaluated with ablation.
+        ax: axes to draw on.
+        noise: seed-noise threshold; a bar below it is indistinguishable from
+            no effect at all. 0 hides the line.
+    Returns:
+        Nothing.
+    """
     base, deltas = _ablation_deltas(run_dir)
     names = sorted(deltas, key=deltas.get)
     ax.barh(names, [deltas[n] for n in names])
@@ -146,19 +237,39 @@ def plot_ablation(run_dir: Path, ax, noise: float = 0.0) -> None:
     ax.grid(True, axis="x", alpha=0.3)
 
 
+def _latest_order_run(pipeline: str, order: str, stamp: str | None) -> Path | None:
+    """The run to show for one channel order.
+
+    Args:
+        pipeline: the pipeline folder name under runs/.
+        order: the channel order, which names the variant folder.
+        stamp: timestamp prefix selecting a sweep session; None takes the
+            latest run whatever its session.
+    Returns:
+        That run dir, or None when the order was never trained.
+    """
+    from boeing_landing.train import PROJECT_ROOT
+    stamps = sorted((PROJECT_ROOT / "runs" / pipeline / order).glob(f"{stamp or ''}*"))
+    return stamps[-1] if stamps else None
+
+
 def _order_run_dirs(config_path: Path, stamp: str | None = None) -> list[Path]:
-    """One run dir per conv-order sweep entry of the given pipeline config:
-    the latest, or the latest whose timestamp starts with `stamp`."""
+    """Find a whole conv-order sweep on disk, so the chart needs no run list.
+
+    Args:
+        config_path: the pipeline config whose sweep to collect.
+        stamp: timestamp prefix selecting a sweep session.
+    Returns:
+        One run dir per order that has been trained.
+    Raises:
+        SystemExit: none has.
+    """
     from boeing_landing.config import load_config
     from boeing_landing.data.features import FEATURE_ORDERS
-    from boeing_landing.train import PROJECT_ROOT
 
     base = load_config(config_path).get("checkpoint_name") or "run"
-    found = []
-    for order in FEATURE_ORDERS:
-        stamps = sorted((PROJECT_ROOT / "runs" / base / order).glob(f"{stamp or ''}*"))
-        if stamps:
-            found.append(stamps[-1])
+    found = [d for d in (_latest_order_run(base, order, stamp) for order in FEATURE_ORDERS)
+             if d is not None]
     if not found:
         raise SystemExit(f"no order-sweep runs for '{base}' (run `make experiment-order` "
                          "first, or loosen STAMP/CONFIG)")
@@ -166,13 +277,27 @@ def _order_run_dirs(config_path: Path, stamp: str | None = None) -> list[Path]:
 
 
 def _best_val_loss(run_dir: Path) -> float:
-    """best_val_loss recorded in the run's summary.json."""
+    """A run's score, read from the summary it wrote.
+
+    Args:
+        run_dir: the run directory.
+    Returns:
+        Its best_val_loss.
+    """
     return json.loads((run_dir / "summary.json").read_text())["best_val_loss"]
 
 
 def plot_best_bars(run_dirs: list[Path], ax, noise: float = 0.0) -> None:
-    """Sweep comparison: best val_loss of each run as sorted bars.
-    Bars left of the `best + noise` line are indistinguishable from the best."""
+    """Draw a sweep comparison: each run's best val_loss as sorted bars.
+
+    Args:
+        run_dirs: the runs compared, each labelled by its variant.
+        ax: axes to draw on.
+        noise: seed-noise threshold; bars left of the `best + noise` line are
+            indistinguishable from the best. 0 hides the line.
+    Returns:
+        Nothing.
+    """
     scores = {_variant_label(d): _best_val_loss(d) for d in run_dirs}
     names = sorted(scores, key=scores.get, reverse=True)
     ax.barh(names, [scores[n] for n in names])
@@ -187,9 +312,17 @@ def plot_best_bars(run_dirs: list[Path], ax, noise: float = 0.0) -> None:
 
 
 def _figure_path(run_dirs: list[Path], bars: bool) -> Path:
-    """Saved PNGs go to figures/<pipeline>/, mirroring the runs organization
-    (never inside the run dirs). Plots mixing several pipelines land in
-    figures/comparisons/."""
+    """Where a saved figure goes: figures/<pipeline>/, mirroring the runs
+    organisation and never inside a run dir. Plots mixing several pipelines
+    land in figures/comparisons/.
+
+    Args:
+        run_dirs: the runs the figure shows.
+        bars: True for a sweep chart, which names the file differently from a
+            curve comparison.
+    Returns:
+        The PNG path, its directory created.
+    """
     from boeing_landing.train import PROJECT_ROOT
     from utils.config import ensure_dir
 
@@ -204,14 +337,29 @@ def _figure_path(run_dirs: list[Path], bars: bool) -> Path:
 
 
 def _style_loss_ax(ax) -> None:
+    """Apply the shared look of the loss panels.
+
+    Args:
+        ax: axes holding loss curves.
+    Returns:
+        Nothing; log scale, since what matters late in training is the ratio,
+        not the absolute gap.
+    """
     ax.set(xlabel="step", ylabel="MSE loss", yscale="log")
     ax.grid(True, which="both", alpha=0.3)
     ax.legend()
 
 
 def _report_single(run_dir: Path, noise: float):
-    """One run's figure: loss curves, plus the per-command MSE and ablation
-    panels when their data exists (make evaluate writes evaluation.json)."""
+    """Assemble one run's figure.
+
+    Args:
+        run_dir: the run directory.
+        noise: seed-noise threshold for the ablation panel.
+    Returns:
+        The figure: loss curves, plus the per-command MSE and ablation panels
+        when their data exists (make evaluate writes evaluation.json).
+    """
     with_commands = (_model_per_command_mse(run_dir) is not None
                      and _mean_predictor_mse(run_dir) is not None)
     with_ablation = _ablation_deltas(run_dir) is not None
@@ -228,6 +376,11 @@ def _report_single(run_dir: Path, noise: float):
 
 
 def main() -> None:
+    """CLI entrypoint: plot one run, or compare several.
+
+    Returns:
+        Nothing; shows the figure, or writes it under figures/ with --save.
+    """
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--runs", type=Path, nargs="+", help="one or more run directories")
     ap.add_argument("--orders", action="store_true",

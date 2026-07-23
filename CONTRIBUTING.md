@@ -109,6 +109,34 @@ Makefile target.
 - Comments and docstrings in English, short and natural.
 - Small single-purpose functions; split rather than grow.
 - No code duplication: shared logic moves to `utils/`.
+- **Every function carries a docstring saying what it does, what its arguments
+  are and what comes back** — the shape below. Keep the rationale ("why it
+  exists", "the trap it avoids") in the summary paragraph; the detailed
+  pedagogy belongs in the DOC, not here.
+
+  ```python
+  def resolve_bounds(train, columns, physical) -> tuple[list, list]:
+      """Min-max normalisation params of several columns.
+
+      Args:
+          train: the training frame (bounds are never fit on validation).
+          columns: columns to resolve, in order.
+          physical: `build.physical_bounds` -- falsy for data-driven bounds only.
+      Returns:
+          Two lists aligned with `columns`: the mins and the maxes.
+      """
+  ```
+
+  `Args:` is dropped when the function takes none, `Returns:` never is — a
+  function that only prints or writes says so (`Nothing; writes the npz`).
+  Add `Raises:` where a guard is the point of the function.
+- **Prefer a functional style**: build a new value rather than mutate an
+  argument, and prefer a comprehension over an accumulator loop. A helper that
+  computes one row/one fold/one column, called from a comprehension, reads and
+  tests better than the same logic inlined in a `for` with `.append`. Where a
+  config must gain a field, return a copy (`_with_dataset`, `with_labels`)
+  instead of writing into the caller's dict — a sweep derives many arms from
+  one base config, and in-place edits leak between them.
 - Parameters belong in configs, never hardcoded in `.py`.
 - Every training run writes to its own `runs/<pipeline>/<variant>/<timestamp>/`
   directory; saved plots go to `figures/<pipeline>/`, never into the runs.

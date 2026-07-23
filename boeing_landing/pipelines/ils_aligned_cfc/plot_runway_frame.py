@@ -25,7 +25,16 @@ _PALETTE = ["#0072B2", "#E69F00", "#009E73", "#CC79A7",
 
 
 def load_augmented(path: Path) -> pd.DataFrame:
-    """The augmented rows only (runs whose runway is in the nav database)."""
+    """Read an augmented csv, keeping what can actually be plotted.
+
+    Args:
+        path: output of augment_ned.
+    Returns:
+        Its rows that have runway-frame coordinates, i.e. the runs whose runway
+        is in the nav database.
+    Raises:
+        SystemExit: the csv was never augmented.
+    """
     df = pd.read_csv(path, sep=";", low_memory=False)
     if "pos_along" not in df:
         raise SystemExit(f"{path} has no runway-frame columns (run augment_ned first)")
@@ -34,11 +43,29 @@ def load_augmented(path: Path) -> pd.DataFrame:
 
 
 def _colors(runways: list[str]) -> dict[str, str]:
+    """Fix one colour per runway, shared by the three panels.
+
+    Args:
+        runways: the designators appearing in the data.
+    Returns:
+        {runway: colour}, taken in order from the colourblind-safe palette.
+    """
     return dict(zip(sorted(set(runways)), _PALETTE))
 
 
 def _plot_runs(df: pd.DataFrame, ax, x: str, y: str, colors: dict, scale_x=1.0) -> None:
-    """One line per run, one color and one legend entry per runway."""
+    """Draw one line per run.
+
+    Args:
+        df: the augmented rows.
+        ax: axes to draw on.
+        x, y: columns to plot.
+        colors: the _colors mapping.
+        scale_x: factor on x (1e-3 to read kilometers).
+    Returns:
+        Nothing; one colour and a single legend entry per runway, however many
+        runs it holds.
+    """
     seen = set()
     for (qfu, _), run in df.groupby(["runway", "simulationindex"]):
         label = qfu if qfu not in seen else None
@@ -47,6 +74,15 @@ def _plot_runs(df: pd.DataFrame, ax, x: str, y: str, colors: dict, scale_x=1.0) 
 
 
 def plot_top(df: pd.DataFrame, ax, colors: dict) -> None:
+    """Top view: cross-track offset against distance to the threshold.
+
+    Args:
+        df: the augmented rows.
+        ax: axes to draw on.
+        colors: the _colors mapping.
+    Returns:
+        Nothing.
+    """
     _plot_runs(df, ax, "pos_along", "pos_cross", colors, scale_x=1e-3)
     ax.axhline(0, color="0.6", lw=0.8, ls=":")
     ax.axvline(0, color="0.6", lw=0.8, ls=":")
@@ -55,6 +91,15 @@ def plot_top(df: pd.DataFrame, ax, colors: dict) -> None:
 
 
 def plot_profile(df: pd.DataFrame, ax, colors: dict) -> None:
+    """Vertical profile: height above the threshold against distance to it.
+
+    Args:
+        df: the augmented rows.
+        ax: axes to draw on.
+        colors: the _colors mapping.
+    Returns:
+        Nothing.
+    """
     _plot_runs(df, ax, "pos_along", "pos_up", colors, scale_x=1e-3)
     ax.axhline(0, color="0.6", lw=0.8, ls=":")
     ax.axvline(0, color="0.6", lw=0.8, ls=":")
@@ -62,7 +107,18 @@ def plot_profile(df: pd.DataFrame, ax, colors: dict) -> None:
 
 
 def plot_localizer_check(df: pd.DataFrame, ax, colors: dict) -> None:
-    """pos_cross vs the sim's localizer error: expected on y = x."""
+    """Cross-check: pos_cross against the sim's own localizer error.
+
+    The two measure the same physical quantity through independent paths (our
+    geodesy, and the simulator's ILS), so the cloud must sit on y = x.
+
+    Args:
+        df: the augmented rows.
+        ax: axes to draw on.
+        colors: the _colors mapping.
+    Returns:
+        Nothing.
+    """
     for qfu, g in df.groupby("runway"):
         ax.scatter(g["localizer_error_m"], g["pos_cross"], s=3,
                    color=colors[qfu], alpha=0.4)
@@ -74,6 +130,14 @@ def plot_localizer_check(df: pd.DataFrame, ax, colors: dict) -> None:
 
 
 def figure(df: pd.DataFrame):
+    """Draw the three panels.
+
+    Args:
+        df: the augmented rows (see load_augmented).
+    Returns:
+        The matplotlib figure: top view, vertical profile and localizer
+        cross-check, sharing one colour per runway.
+    """
     colors = _colors(df["runway"].tolist())
     fig, axes = plt.subplots(1, 3, figsize=(16, 5))
     plot_top(df, axes[0], colors)
@@ -90,6 +154,11 @@ def figure(df: pd.DataFrame):
 
 
 def main() -> None:
+    """CLI entrypoint: plot the augmented csv given as argument.
+
+    Returns:
+        Nothing; shows the figure, or saves it into figures/dataset/ with --save.
+    """
     from boeing_landing.train import PROJECT_ROOT
     from utils.config import ensure_dir
 

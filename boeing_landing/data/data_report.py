@@ -34,6 +34,14 @@ OVERFLOW_PCT = 5.0    # % of val frames outside [0,1] worth flagging
 
 
 def _load(npz_path: Path):
+    """Read the pieces of a split this report needs.
+
+    Args:
+        npz_path: a split written by build_dataset.
+    Returns:
+        (X as float, channel names, x_min, x_max, norm_method) -- the bounds
+        come from the npz itself, so train and val are read on the same scale.
+    """
     z = np.load(npz_path, allow_pickle=True)
     method = str(z["norm_method"]) if "norm_method" in z else "minmax"
     return (z["X"].astype(float), [str(n) for n in z["input_names"]],
@@ -41,6 +49,15 @@ def _load(npz_path: Path):
 
 
 def _flag(norm_std: float, val_out_pct: float) -> str:
+    """Classify one channel.
+
+    Args:
+        norm_std: its spread in [0,1] on train.
+        val_out_pct: share of validation frames it sends outside [0,1].
+    Returns:
+        'CONSTANT', 'weak', 'val-shift' or 'ok' -- weakness is checked first,
+        a flat channel having no distribution to shift.
+    """
     if norm_std < CONSTANT_STD:
         return "CONSTANT"
     if norm_std < WEAK_STD:
@@ -50,29 +67,55 @@ def _flag(norm_std: float, val_out_pct: float) -> str:
     return "ok"
 
 
+def _feature_row(name: str, raw, norm_train, norm_val) -> dict:
+    """Diagnostics of a single channel.
+
+    Args:
+        name: the channel name.
+        raw: its raw train values.
+        norm_train, norm_val: its normalised train and validation values.
+    Returns:
+        One report row: raw range and std, normalised std, span, the share of
+        validation frames outside [0,1], and the resulting flag.
+    """
+    val_out = 100.0 * float(np.mean((norm_val < 0) | (norm_val > 1)))
+    norm_std = float(norm_train.std())
+    return {
+        "name": name,
+        "raw_min": float(raw.min()), "raw_max": float(raw.max()),
+        "raw_std": float(raw.std()),
+        "norm_std": norm_std,
+        "span": float(norm_train.max() - norm_train.min()),
+        "val_out_pct": val_out,
+        "flag": _flag(norm_std, val_out),
+    }
+
+
 def feature_stats(train_npz: Path, val_npz: Path) -> list[dict]:
-    """One row of diagnostics per input channel."""
+    """Diagnose every input channel of a built dataset.
+
+    Args:
+        train_npz: the training split, which also fixes the bounds used.
+        val_npz: the validation split, normalised with those same bounds so
+            val_out% really measures distribution shift.
+    Returns:
+        One _feature_row per channel, in npz order.
+    """
     x_tr, names, lo, hi, method = _load(train_npz)
     x_va = _load(val_npz)[0]
     n_tr, n_va = normalize(x_tr, lo, hi, method), normalize(x_va, lo, hi, method)
-    rows = []
-    for i, name in enumerate(names):
-        col, ntr, nva = x_tr[:, i], n_tr[:, i], n_va[:, i]
-        val_out = 100.0 * float(np.mean((nva < 0) | (nva > 1)))
-        norm_std = float(ntr.std())
-        rows.append({
-            "name": name,
-            "raw_min": float(col.min()), "raw_max": float(col.max()),
-            "raw_std": float(col.std()),
-            "norm_std": norm_std,
-            "span": float(ntr.max() - ntr.min()),
-            "val_out_pct": val_out,
-            "flag": _flag(norm_std, val_out),
-        })
-    return rows
+    return [_feature_row(name, x_tr[:, i], n_tr[:, i], n_va[:, i])
+            for i, name in enumerate(names)]
 
 
 def print_report(rows: list[dict]) -> None:
+    """Print the diagnostics table and the two summary lists.
+
+    Args:
+        rows: what feature_stats returned.
+    Returns:
+        Nothing.
+    """
     print(f"{'feature':22s} {'raw[min, max]':>26s} {'raw_std':>10s} "
           f"{'norm_std':>9s} {'span':>6s} {'val_out%':>9s}  flag")
     for r in rows:
@@ -93,7 +136,15 @@ _COLORS = {"CONSTANT": "#c0392b", "weak": "#e67e22", "val-shift": "#8e44ad", "ok
 
 
 def figure(rows: list[dict], title: str):
-    """Two panels sharing the channel axis: norm_std (weakness) and val_out%."""
+    """Draw the report.
+
+    Args:
+        rows: what feature_stats returned.
+        title: figure title, usually the dataset name.
+    Returns:
+        The matplotlib figure: two panels sharing the channel axis, norm_std
+        (weakness) and val_out% (shift), coloured by flag.
+    """
     import matplotlib.pyplot as plt
 
     names = [r["name"] for r in rows]
@@ -119,6 +170,11 @@ def figure(rows: list[dict], title: str):
 
 
 def main() -> None:
+    """CLI entrypoint: report on the dataset the --config points at.
+
+    Returns:
+        Nothing; prints the table, then shows or saves the figure.
+    """
     from boeing_landing.config import load_config
     from boeing_landing.train import DEFAULT_CONFIG, PROJECT_ROOT
     from utils.config import ensure_dir

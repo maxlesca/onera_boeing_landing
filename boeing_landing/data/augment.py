@@ -27,8 +27,21 @@ from boeing_landing.data.geodesy import load_navdb
 def run_augment(config: dict, source: Path | None = None, navdb: Path | None = None,
                 output: Path | None = None) -> Path:
     """Dispatch to the pipeline's augmentation module and write its output csv.
-    Paths default to the config's `augment:` block, so the build step can call
-    this on its own -- one command builds the whole chain."""
+
+    Args:
+        config: the resolved pipeline config, read for its `augment:` block
+            (module, raw_csv, navdb, out_csv).
+        source: raw csv to read; defaults to the block's raw_csv, so the build
+            step can call this with the config alone.
+        navdb: nav database json; defaults to the block's navdb.
+        output: csv to write; defaults to the block's out_csv.
+    Returns:
+        Path of the written csv. Runs missing from the database keep NaN and
+        are reported, never dropped.
+    Raises:
+        SystemExit: the config declares no augmentation, or the output would
+            overwrite one of the inputs.
+    """
     cfg = config.get("augment")
     if not cfg:
         raise SystemExit("this config has no `augment:` section -- its pipeline "
@@ -53,6 +66,11 @@ def run_augment(config: dict, source: Path | None = None, navdb: Path | None = N
 
 
 def main() -> None:
+    """CLI entrypoint: run the augmentation on its own.
+
+    Returns:
+        Nothing; see run_augment for what is written.
+    """
     from boeing_landing.config import load_config
     from boeing_landing.train import DEFAULT_CONFIG
 

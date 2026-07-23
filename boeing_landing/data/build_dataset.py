@@ -36,9 +36,15 @@ from boeing_landing.data.normalization import add_angle_encodings, resolve_norm
 
 
 def load_csv(source: Path) -> pd.DataFrame:
-    """Read the dataset CSV, from a .zip or a plain .csv (';'-separated).
-    low_memory=False: the runway designator column mixes '16R' and '2', which
-    otherwise triggers a mixed-dtype warning."""
+    """Read the dataset csv.
+
+    Args:
+        source: a ';'-separated .csv, or a .zip holding one.
+    Returns:
+        The frame as delivered, nothing renamed or dropped. low_memory=False:
+        the runway designator column mixes '16R' and '2', which otherwise
+        triggers a mixed-dtype warning.
+    """
     if source.suffix.lower() == ".zip":
         with zipfile.ZipFile(source) as z:
             name = next(n for n in z.namelist() if n.endswith(".csv"))
@@ -47,34 +53,84 @@ def load_csv(source: Path) -> pd.DataFrame:
     return pd.read_csv(source, sep=";", low_memory=False)
 
 
-def clean(df: pd.DataFrame, inputs: list[str], labels: list[str] = LABELS) -> pd.DataFrame:
-    """Drop rows with missing fields, add an int `run`, sort by (run, time)."""
-    n_total = len(df)
-    needed = ["simulationindex", "time"] + list(inputs) + list(labels)
+def _require_columns(df: pd.DataFrame, needed: list[str]) -> None:
+    """Fail before any work when the csv cannot answer the config.
+
+    Args:
+        df: the source frame.
+        needed: the columns the build is about to read.
+    Returns:
+        Nothing.
+    Raises:
+        SystemExit: at least one is absent, listing them all at once.
+    """
     missing = [c for c in needed if c not in df.columns]
     if missing:
         raise SystemExit(
             f"CSV lacks the columns {missing}. The local-frame pipelines need the "
             f"AUGMENTED csv, which `make dataset` produces on its own from the "
             f"pipeline's prepare:/augment: block -- pass CSV=... only to override it.")
-    # dropna on the REQUIRED columns only: an optional column (image_filename) is
-    # neither an input nor a label, so a hole in it must not cost a training frame.
-    df = df.dropna(subset=needed).copy()
-    print(f"{n_total} rows read, {n_total - len(df)} dropped (NaN), {len(df)} kept")
-    for col in (c for c in OPTIONAL_COLUMNS if c in df.columns):
-        if n_missing := int(df[col].isna().sum()):
+
+
+def _fill_optional(df: pd.DataFrame) -> pd.DataFrame:
+    """Close the holes in the optional side columns and report them.
+
+    Args:
+        df: the cleaned frame.
+    Returns:
+        A frame whose OPTIONAL_COLUMNS carry '' instead of NaN -- they are
+        neither inputs nor labels, so a hole is worth a note, not a lost frame.
+    """
+    holes = {c: int(df[c].isna().sum()) for c in OPTIONAL_COLUMNS if c in df.columns}
+    for col, n_missing in holes.items():
+        if n_missing:
             print(f"  note: {col} empty on {n_missing} kept rows")
-            df[col] = df[col].fillna("")
-    df["run"] = df["simulationindex"].astype(int)
-    return df.sort_values(["run", "time"]).reset_index(drop=True)
+    return df.assign(**{c: df[c].fillna("") for c in holes})
+
+
+def clean(df: pd.DataFrame, inputs: list[str], labels: list[str] = LABELS) -> pd.DataFrame:
+    """Reduce a source csv to the rows and the ordering the build can use.
+
+    Args:
+        df: the frame read from the csv.
+        inputs: input columns the pipeline selected.
+        labels: label columns the pipeline selected.
+    Returns:
+        A new frame holding only rows complete on those columns, with an int
+        `run` column added and sorted by (run, time). Rows are dropped on the
+        REQUIRED columns only -- a run whose geodesy failed (NaN position) is
+        what silently disappears here, hence the printed count.
+    Raises:
+        SystemExit: a required column is missing from the csv.
+    """
+    n_total = len(df)
+    needed = ["simulationindex", "time"] + list(inputs) + list(labels)
+    _require_columns(df, needed)
+    kept = df.dropna(subset=needed)
+    print(f"{n_total} rows read, {n_total - len(kept)} dropped (NaN), {len(kept)} kept")
+    return (_fill_optional(kept)
+            .assign(run=lambda d: d["simulationindex"].astype(int))
+            .sort_values(["run", "time"])
+            .reset_index(drop=True))
 
 
 def split_runs(df: pd.DataFrame, val_runs: set[int],
                train_runs: set[int] | None = None) -> tuple[pd.DataFrame, pd.DataFrame]:
-    """Split into (train, val) by run id. `train_runs` restricts training to an
-    explicit list -- every other run is discarded, which is what lets a phase-1
-    study train on 30 of the 85 available runs. Left empty, training takes every
-    run that is not held out (the historical behaviour)."""
+    """Split by run id -- never by frame: consecutive frames are near-identical,
+    so a random split would leak validation into training.
+
+    Args:
+        df: the cleaned frame.
+        val_runs: runs held out for validation.
+        train_runs: explicit training runs, every other run being discarded --
+            what lets a phase-1 study train on 30 of the 85 available runs.
+            Empty/None trains on every run that is not held out.
+    Returns:
+        (train, val), two views of `df`.
+    Raises:
+        SystemExit: a declared run is absent from the csv, or a run is listed on
+            both sides.
+    """
     present = set(df["run"].unique())
     # strict, like the train check below: val runs are picked one by one for what
     # each tests, so validating on the survivors would drop a test case in silence
@@ -93,13 +149,23 @@ def split_runs(df: pd.DataFrame, val_runs: set[int],
 
 def compute_bounds(train: pd.DataFrame, inputs: list[str], physical=False,
                    method: str = "minmax", labels: list[str] = LABELS) -> dict:
-    """Normalisation params (see data.normalization). `method`: 'minmax' (default)
-    or 'zscore'. For minmax, `physical` (True/"core" -> position+attitude, "all" ->
-    also wind/velocities/rates) uses the fixed bound for channels that have one;
-    every other channel (and all labels) uses the train-split stat. x_min/x_max
-    hold (min,max) for minmax and (mean,std) for zscore.
-    Computed on the TRAIN split only, then embedded in both npz -- validation is
-    normalised with the training bounds, never with its own."""
+    """Fit the normalisation on the TRAIN split only, then let it travel with the
+    data: both npz embed it, so validation is normalised with the training
+    bounds and never with its own.
+
+    Args:
+        train: the training split.
+        inputs: input columns, in npz order.
+        physical: fixed-bounds selector -- True/'core' for position+attitude,
+            'all' to add wind/velocities/rates (see data.normalization). Any
+            channel without a fixed bound, and every label, uses the train stat.
+        method: 'minmax' or 'zscore'.
+        labels: label columns.
+    Returns:
+        The bounds dict saved into each npz: the column lists, the method, and
+        x_min/x_max, y_min/y_max holding (min, max) for minmax and (mean, std)
+        for zscore.
+    """
     x_min, x_max = resolve_norm(train, inputs, method, physical)
     y_min, y_max = resolve_norm(train, labels, method, physical)
     return {"inputs": inputs, "labels": list(labels), "norm_method": method,
@@ -107,7 +173,17 @@ def compute_bounds(train: pd.DataFrame, inputs: list[str], physical=False,
 
 
 def save_split(name: str, part: pd.DataFrame, bounds: dict, out_dir: Path) -> None:
-    """Write one split to `landing_<name>.npz` (raw values + embedded bounds)."""
+    """Write one split to `landing_<name>.npz`.
+
+    Args:
+        name: 'train' or 'val', which names the file.
+        part: that split's rows.
+        bounds: the compute_bounds dict -- it also fixes the column order.
+        out_dir: destination directory, expected to exist.
+    Returns:
+        Nothing; writes the npz (raw values, run/time columns, any optional
+        side column, and the embedded bounds) and prints what it wrote.
+    """
     inputs, labels = bounds["inputs"], bounds["labels"]
     optional = {c: part[c].to_numpy() for c in OPTIONAL_COLUMNS if c in part.columns}
     np.savez_compressed(
@@ -129,25 +205,52 @@ def save_split(name: str, part: pd.DataFrame, bounds: dict, out_dir: Path) -> No
           f"-> {out_dir / f'landing_{name}.npz'}")
 
 
-def build(source: Path, val_runs: set[int], out_dir: Path,
-          extra_columns: list[str] = (), input_set: str = "gps",
-          physical_bounds=False, norm_method: str = "minmax",
-          label_set: str = "commands", train_runs: set[int] | None = None) -> None:
-    """input_set: the base input columns (features.INPUT_SETS -- 'gps' keeps the
-    GPS position as absolute lat/lon/alt, 'runway'/'magnetic' convert that same
-    position into a local frame). ILS is in none of them.
-    label_set: the command channels to predict (features.LABEL_SETS).
-    extra_columns: additional CSV columns appended as inputs.
-    train_runs: explicit training runs (default: everything not held out).
-    physical_bounds: normalise with the fixed physical bounds (data.normalization)
-    where a channel has one -- airport-independent; off by default (gps_cfc)."""
+def dataset_columns(input_set: str, label_set: str,
+                    extra_columns: list[str] = ()) -> tuple[list[str], list[str]]:
+    """Resolve the named sets a config declares into actual column lists.
+
+    Args:
+        input_set: key of features.INPUT_SETS.
+        label_set: key of features.LABEL_SETS.
+        extra_columns: additional csv columns appended as inputs.
+    Returns:
+        (inputs, labels), in the canonical order the npz stores.
+    Raises:
+        SystemExit: either name is unknown -- a typo must not fall back to a
+            default set and silently train the wrong recipe.
+    """
     if input_set not in INPUT_SETS:
         raise SystemExit(f"unknown input_set {input_set!r}; choose from {sorted(INPUT_SETS)}")
     if label_set not in LABEL_SETS:
         raise SystemExit(f"unknown label_set {label_set!r}; choose from {sorted(LABEL_SETS)}")
-    inputs, labels = INPUT_SETS[input_set] + list(extra_columns), LABEL_SETS[label_set]
-    df = add_angle_encodings(load_csv(source), inputs)
-    df = clean(df, inputs, labels)
+    return INPUT_SETS[input_set] + list(extra_columns), LABEL_SETS[label_set]
+
+
+def build(source: Path, val_runs: set[int], out_dir: Path,
+          extra_columns: list[str] = (), input_set: str = "gps",
+          physical_bounds=False, norm_method: str = "minmax",
+          label_set: str = "commands", train_runs: set[int] | None = None) -> None:
+    """Whole build: csv -> two npz plus their bounds file.
+
+    Args:
+        source: the csv (or zip) to read.
+        val_runs: runs held out for validation.
+        out_dir: destination directory, created if needed.
+        extra_columns: extra csv columns appended as inputs.
+        input_set: the base input columns (features.INPUT_SETS -- 'gps' keeps
+            the GPS position as absolute lat/lon/alt, the local-frame sets
+            convert that same position). ILS is in none of them.
+        physical_bounds: normalise with the fixed airport-independent bounds
+            where a channel has one; off by default (gps_cfc).
+        norm_method: 'minmax' or 'zscore'.
+        label_set: the command channels to predict (features.LABEL_SETS).
+        train_runs: explicit training runs (default: everything not held out).
+    Returns:
+        Nothing; writes landing_train.npz, landing_val.npz and
+        normalization_bounds.json into out_dir, and prints the recipe used.
+    """
+    inputs, labels = dataset_columns(input_set, label_set, extra_columns)
+    df = clean(add_angle_encodings(load_csv(source), inputs), inputs, labels)
     train, val = split_runs(df, val_runs, train_runs)
     bounds = compute_bounds(train, inputs, physical_bounds, norm_method, labels)
 
@@ -167,12 +270,22 @@ def _resolve_source(source: Path | None, config: dict, force: bool = False) -> P
     delivery) or `augment:` (add the local-frame coordinates) -- and this runs it
     when its output csv is not there yet, so `make dataset` builds the whole
     chain in one command instead of asking for the steps in the right order.
-    An existing csv is reused as is; FORCE=1 rebuilds it.
-    gps_cfc declares neither and must be given a source explicitly.
 
     Declaring both is rejected rather than half-executed: only the first would
     run, and build() would then fail on the columns the second was to produce.
     The day a delivery needs both, make this an ordered list of steps.
+
+    Args:
+        source: an explicit csv, which short-circuits everything below.
+        config: the resolved pipeline config, read for its prepare:/augment:
+            block.
+        force: re-run the upstream step even when its csv already exists;
+            otherwise an existing csv is reused as is.
+    Returns:
+        Path of the csv to build from.
+    Raises:
+        SystemExit: both steps are declared, or none is and no source was given
+            (gps_cfc, which builds straight from the raw csv).
     """
     if source is not None:
         return source
@@ -194,16 +307,36 @@ def _resolve_source(source: Path | None, config: dict, force: bool = False) -> P
 
 
 def _run_prepare(config: dict) -> Path:
+    """Run the config's prepare: step (imported late, so a pipeline without one
+    never pulls pandas machinery it does not use).
+
+    Args:
+        config: the resolved pipeline config.
+    Returns:
+        Path of the canonical csv it wrote.
+    """
     from boeing_landing.data.prepare import run_prepare
     return run_prepare(config, None, None, None)
 
 
 def _run_augment(config: dict) -> Path:
+    """Run the config's augment: step.
+
+    Args:
+        config: the resolved pipeline config.
+    Returns:
+        Path of the augmented csv it wrote.
+    """
     from boeing_landing.data.augment import run_augment
     return run_augment(config)
 
 
 def main() -> None:
+    """CLI entrypoint: read the config's build: section and build the npz.
+
+    Returns:
+        Nothing; see build() for what lands on disk.
+    """
     from boeing_landing.config import load_config
     from boeing_landing.train import DEFAULT_CONFIG
 

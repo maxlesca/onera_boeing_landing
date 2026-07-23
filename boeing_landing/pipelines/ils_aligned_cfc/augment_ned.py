@@ -51,41 +51,83 @@ POS_COLUMNS = ["pos_along", "pos_cross", "pos_up"]
 
 
 def _course_spin(course: float) -> np.ndarray:
-    """NED -> (along, left, up): rotation around Down by the approach course,
-    then lateral and vertical axes mirrored to match the ILS deviation signs
-    (cross positive LEFT like localizer_error_m, up positive like
-    glideslope_error_m). Determinant +1: still right-handed."""
+    """The rotation taking local NED to the runway frame.
+
+    Args:
+        course: true course of the approach, radians from north.
+    Returns:
+        The (3, 3) matrix: a spin around Down by `course`, with the lateral and
+        vertical axes mirrored so the signs match the ILS deviations (cross
+        positive LEFT like localizer_error_m, up positive like
+        glideslope_error_m). Determinant +1: still right-handed.
+    """
     c, s = np.cos(course), np.sin(course)
     return np.array([[c, s, 0.0], [s, -c, 0.0], [0.0, 0.0, -1.0]])
 
 
 def _positions(rows: pd.DataFrame, entry: dict) -> np.ndarray:
-    """(n, 3) along/cross/up of the rows' GPS in the entry's runway frame: local
-    NED at the LTP (pymap3d), then spun about Down by the approach course."""
+    """Aircraft positions in one runway's frame.
+
+    Args:
+        rows: frames of a single (airport, runway), read for their GPS fix.
+        entry: that runway's nav database entry.
+    Returns:
+        (n, 3) along/cross/up in meters: local NED at the LTP (pymap3d), then
+        spun about Down by the approach course.
+    """
     lat0, lon0, alt0 = entry["ltp"]
     ned = geodetic_to_ned(rows["latitude"].to_numpy(), rows["longitude"].to_numpy(),
                           rows["altitude"].to_numpy(), lat0, lon0, alt0)
     return ned @ _course_spin(approach_course(entry)).T
 
 
+def _group_columns(rows: pd.DataFrame, entry: dict) -> pd.DataFrame:
+    """The 7 new columns for the frames of one runway.
+
+    Args:
+        rows: frames of a single (airport, runway).
+        entry: that runway's nav database entry.
+    Returns:
+        A frame indexed like `rows`, holding the constant LTP/course columns
+        and the per-frame runway-frame position.
+    """
+    origin = np.tile([*entry["ltp"], approach_course(entry)], (len(rows), 1))
+    return pd.DataFrame(np.hstack([origin, _positions(rows, entry)]),
+                        index=rows.index, columns=POI_COLUMNS + POS_COLUMNS)
+
+
 def augment(df: pd.DataFrame, navdb: dict) -> tuple[pd.DataFrame, list]:
-    """Copy of df with the 7 new columns; also returns the (airport, runway)
-    pairs absent from the database (their rows keep NaN)."""
-    df = df.copy()
-    for col in POI_COLUMNS + POS_COLUMNS:
-        df[col] = np.nan
-    missing = []
-    for (airport, runway), rows in df.groupby(["airport", "runway"]):
-        entry = navdb.get((airport.strip(), norm_qfu(runway)))
-        if entry is None:
-            missing.append((airport, runway, len(rows)))
-            continue
-        df.loc[rows.index, POI_COLUMNS] = (*entry["ltp"], approach_course(entry))
-        df.loc[rows.index, POS_COLUMNS] = _positions(rows, entry)
-    return df, missing
+    """Add the runway-frame coordinates to a landing csv.
+
+    Args:
+        df: the raw frames, left untouched.
+        navdb: the nav database (geodesy.load_navdb).
+    Returns:
+        (augmented frame, missing) -- a copy of df carrying the 7 new columns,
+        and the (airport, runway, row count) triples absent from the database.
+        Their rows keep NaN: a run is reported, never silently dropped here.
+    """
+    groups = [(airport, runway, rows, navdb.get((airport.strip(), norm_qfu(runway))))
+              for (airport, runway), rows in df.groupby(["airport", "runway"])]
+    known = [_group_columns(rows, entry) for _, _, rows, entry in groups if entry is not None]
+    columns = (pd.concat(known).reindex(df.index) if known
+               else pd.DataFrame(np.nan, index=df.index, columns=POI_COLUMNS + POS_COLUMNS))
+    missing = [(airport, runway, len(rows))
+               for airport, runway, rows, entry in groups if entry is None]
+    return df.assign(**{name: columns[name] for name in columns}), missing
 
 
 def _report(df: pd.DataFrame, missing: list, out: Path) -> None:
+    """Print what the augmentation covered.
+
+    Args:
+        df: the augmented frame.
+        missing: the triples augment returned.
+        out: where the csv was written.
+    Returns:
+        Nothing; a missing runway is a WARNING line, since its rows will be
+        dropped later by the build's NaN filter.
+    """
     done = df[POS_COLUMNS[0]].notna()
     print(f"{done.sum()}/{len(df)} rows augmented -> {out}")
     for airport, runway, n in missing:
@@ -94,6 +136,12 @@ def _report(df: pd.DataFrame, missing: list, out: Path) -> None:
 
 
 def main() -> None:
+    """CLI entrypoint: augment a csv on its own (the pipeline normally goes
+    through data/augment.py, which reads the paths from the config).
+
+    Returns:
+        Nothing; writes the augmented csv and prints the coverage.
+    """
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("source", type=Path, help="raw ldg_*.csv (read-only)")
     ap.add_argument("navdb", type=Path, help="NavDB json (read-only)")

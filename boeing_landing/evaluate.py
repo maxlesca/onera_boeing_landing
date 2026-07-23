@@ -51,8 +51,15 @@ ABLATION_GROUPS = {
 
 
 def _ablation_groups(input_labels: list[str]) -> dict:
-    """Each group restricted to the channels this run actually has; empty groups
-    (a group the run holds none of) are dropped."""
+    """Restrict the ablation table to what one run can actually mask.
+
+    Args:
+        input_labels: the run's input channels, in model order.
+    Returns:
+        {group: channels present in this run}, groups it holds none of being
+        dropped -- that is what lets one table serve the gps set and the
+        local-frame sets.
+    """
     present = set(input_labels)
     groups = {name: [c for c in channels if c in present]
               for name, channels in ABLATION_GROUPS.items()}
@@ -60,7 +67,15 @@ def _ablation_groups(input_labels: list[str]) -> dict:
 
 
 def _find_run_files(run_dir: Path) -> tuple[dict, Path]:
-    """A run dir holds exactly one config.yaml and one best checkpoint."""
+    """Locate what a run dir must hold to be evaluated.
+
+    Args:
+        run_dir: the directory a training run wrote.
+    Returns:
+        (its archived config, its best checkpoint).
+    Raises:
+        SystemExit: no checkpoint there.
+    """
     config = load_yaml(run_dir / "config.yaml")
     checkpoints = sorted(run_dir.glob("*.ckpt"))
     if not checkpoints:
@@ -69,7 +84,16 @@ def _find_run_files(run_dir: Path) -> tuple[dict, Path]:
 
 
 def _val_arrays(config: dict):
-    """Validation tensors with the exact preprocessing the run was trained with."""
+    """Rebuild the validation tensors with the exact preprocessing the run was
+    trained with -- the archived config is read for all of it, so a later change
+    of defaults cannot rescore an old run under a new recipe.
+
+    Args:
+        config: the run's archived config.
+    Returns:
+        (inputs, outputs) as _load_split returns them. No input noise: the score
+        must measure the model, not the seed.
+    """
     d = config["dataset"]
     seq_len = int(config["sequencing"]["seq_len"]) if config.get("sequencing", {}).get("value") else 0
     return _load_split(d["val_npz"], _resolve_order(d), int(d["portion_len"]), int(d["stride"]),
@@ -77,18 +101,48 @@ def _val_arrays(config: dict):
 
 
 def _val_portion_runs(config: dict) -> np.ndarray:
-    """Run id of every validation portion, in tensor order (see loader)."""
+    """Run id of every validation portion, in tensor order.
+
+    Args:
+        config: the run's archived config (val_npz, portion_len, stride).
+    Returns:
+        The int array data.loader.portion_runs produces for that split.
+    """
     d = config["dataset"]
     return portion_runs(d["val_npz"], int(d["portion_len"]), int(d["stride"]))
 
 
 def mean_r2(regression: dict) -> float:
-    """Mean R2 over the command channels that have one. Channels whose target is
-    constant (the dead `directional`, `flap`, `speedbreak`) give R2 = NaN and are
-    skipped -- averaging them in would be averaging in an undefined number.
-    Scale-invariant, so unlike val_loss it compares across normalisation methods."""
+    """Summarise a regression report in one scale-invariant number -- unlike
+    val_loss it compares across normalisation methods.
+
+    Args:
+        regression: what regression_metrics returned.
+    Returns:
+        The mean R2 over the command channels that have one. A channel whose
+        target is constant (the dead `directional`, `flap`, `speedbreak`) gives
+        NaN and is skipped: averaging it in would average in an undefined
+        number. NaN when no channel has an R2 at all.
+    """
     finite = [m["r2"] for m in regression["per_channel"].values() if math.isfinite(m["r2"])]
     return float(statistics.mean(finite)) if finite else float("nan")
+
+
+def _run_regression(yhat, target, mask, labels: list[str]) -> dict:
+    """Score the portions of a single held-out run.
+
+    Args:
+        yhat, target: predictions and truth, (portions, time, channels).
+        mask: boolean selector of that run's portions.
+        labels: command channel names.
+    Returns:
+        Its portion count, global MSE, mean R2 and per-channel metrics.
+    """
+    reg = regression_metrics(yhat[mask], target[mask], labels)
+    return {"n_portions": int(mask.sum()),
+            "mse": reg["global"]["mse"],
+            "mean_r2": mean_r2(reg),
+            "per_channel": reg["per_channel"]}
 
 
 def _per_run_regression(yhat, target, runs, labels: list[str]) -> dict:
@@ -99,36 +153,58 @@ def _per_run_regression(yhat, target, runs, labels: list[str]) -> dict:
     score cannot tell "the recipe does not extrapolate" from "the recipe has not
     converged". Per run, it can.
 
-    The evaluation dataloader keeps the portion order (shuffle=False) but drops
-    the last incomplete batch, so the ids are truncated to what was scored.
+    Args:
+        yhat, target: predictions and truth, batched or flat.
+        runs: run id of every portion, in tensor order. The evaluation
+            dataloader keeps that order (shuffle=False) but drops the last
+            incomplete batch, so the ids are truncated to what was scored.
+        labels: command channel names.
+    Returns:
+        {run id: its _run_regression report}.
     """
     yhat = yhat.reshape(-1, *yhat.shape[-2:])
     target = target.reshape(-1, *target.shape[-2:])
     runs = np.asarray(runs)[:len(yhat)]
-    per_run = {}
-    for run in np.unique(runs):
-        mask = runs == run
-        reg = regression_metrics(yhat[mask], target[mask], labels)
-        per_run[int(run)] = {"n_portions": int(mask.sum()),
-                             "mse": reg["global"]["mse"],
-                             "mean_r2": mean_r2(reg),
-                             "per_channel": reg["per_channel"]}
-    return per_run
+    return {int(run): _run_regression(yhat, target, runs == run, labels)
+            for run in np.unique(runs)}
 
 
 def _print_metrics(name: str, m: dict) -> None:
+    """Print one MSE/runtime line.
+
+    Args:
+        name: what is being scored ("Baseline", "Ablation[wind]", ...).
+        m: the metrics dict from utils.evaluation.metrics.
+    Returns:
+        Nothing.
+    """
     print(f"{name}: MSE={m['mse_mean']:.8f} ± {m['mse_std']:.8f} | "
           f"runtime={m['runtime_mean']:.6f}s ± {m['runtime_std']:.6f}s")
 
 
 def _labels(config: dict) -> list[str]:
-    """The run's own command labels (a run trained before a LABELS change must
-    be evaluated with the labels it was trained on)."""
+    """The run's own command labels.
+
+    Args:
+        config: the run's archived config.
+    Returns:
+        Its output_labels, falling back to LABELS -- a run trained before a
+        LABELS change must be evaluated with the labels it was trained on.
+    """
     return list(config["dataset"].get("output_labels") or LABELS)
 
 
 def _baseline_results(config: dict, checkpoint: Path, inputs, outputs):
-    """Evaluate the run as-is: loss metrics, per-command and per-run regression."""
+    """Evaluate the run as trained.
+
+    Args:
+        config: the run's archived config.
+        checkpoint: its best checkpoint.
+        inputs, outputs: the validation tensors.
+    Returns:
+        (results, yhat, target), results holding the loss metrics, the
+        per-command regression and the per-run breakdown.
+    """
     yhat, target, runtime = evaluate_arrays(config, config["dataloader"], checkpoint, inputs, outputs)
     labels = _labels(config)
     results = {"baseline": metrics(yhat, target, runtime),
@@ -138,9 +214,18 @@ def _baseline_results(config: dict, checkpoint: Path, inputs, outputs):
 
 
 def _ablation_results(config: dict, checkpoint: Path, inputs, outputs) -> dict:
-    """Re-evaluate with each feature group masked (fill_value from the config).
-    expand_labels=False: our labels are one channel each ("u" is a body
-    velocity here, not the quadrotor's 4-motor command vector)."""
+    """Re-evaluate once per feature group, that group masked.
+
+    Args:
+        config: the run's archived config (evaluation.fill_value, input_labels).
+        checkpoint: its best checkpoint.
+        inputs, outputs: the validation tensors, left untouched -- each pass
+            masks a copy.
+    Returns:
+        {group: metrics with that group masked}. expand_labels=False: our
+        labels are one channel each ("u" is a body velocity here, not the
+        quadrotor's 4-motor command vector).
+    """
     ablation_cfg = {"enabled": True,
                     "fill_value": config.get("evaluation", {}).get("fill_value", 0.0),
                     "feature_sets": _ablation_groups(config["dataset"].get("input_labels", []))}
@@ -148,13 +233,31 @@ def _ablation_results(config: dict, checkpoint: Path, inputs, outputs) -> dict:
                                    inputs, outputs, ablation_cfg, expand_labels=False))
 
 
+def _live_channels(per_run: dict) -> list[str]:
+    """The command channels worth a column in the per-run table.
+
+    Args:
+        per_run: what _per_run_regression returned.
+    Returns:
+        Those with a defined R2 on at least one run -- a constant command would
+        otherwise print a wall of nan.
+    """
+    return [name for name in next(iter(per_run.values()))["per_channel"]
+            if any(math.isfinite(r["per_channel"][name]["r2"]) for r in per_run.values())]
+
+
 def _print_per_run(per_run: dict) -> None:
-    """One line per held-out run. Only the channels that have a defined R2
-    somewhere get a column -- a constant command would print a wall of nan."""
+    """Print one line per held-out run, R2 by command.
+
+    Args:
+        per_run: what _per_run_regression returned; fewer than two runs prints
+            nothing, the global table already saying it all.
+    Returns:
+        Nothing.
+    """
     if len(per_run) < 2:
         return
-    live = [name for name in next(iter(per_run.values()))["per_channel"]
-            if any(math.isfinite(r["per_channel"][name]["r2"]) for r in per_run.values())]
+    live = _live_channels(per_run)
     print(f"\n{'run':>6s} {'portions':>9s} {'mse':>10s} {'mean_r2':>8s}  "
           + " ".join(f"{name[:12]:>12s}" for name in live))
     for run, r in sorted(per_run.items()):
@@ -163,6 +266,14 @@ def _print_per_run(per_run: dict) -> None:
 
 
 def _print_results(results: dict) -> None:
+    """Print the whole report: loss line, per-command table, per-run table,
+    then one line per ablated group.
+
+    Args:
+        results: the dict evaluate_run assembled.
+    Returns:
+        Nothing.
+    """
     _print_metrics("Baseline", results["baseline"])
     reg = results["regression"]
     print(f"{'command':14s} {'r2':>8s} {'rmse':>10s} {'mae':>10s} {'max_err':>10s}")
@@ -174,22 +285,47 @@ def _print_results(results: dict) -> None:
 
 
 def _save_results(run_dir: Path, results: dict) -> None:
+    """Archive the report next to the checkpoint.
+
+    Args:
+        run_dir: the run directory.
+        results: the dict evaluate_run assembled.
+    Returns:
+        Nothing; writes evaluation.json, which report.py later plots from.
+    """
     (run_dir / "evaluation.json").write_text(json.dumps(results, indent=2))
     print(f"saved -> {run_dir / 'evaluation.json'}")
 
 
+def _wants_ablation(config: dict, override: bool | None) -> bool:
+    """Whether to run the ablation suite.
+
+    Args:
+        config: the run's archived config (its evaluation.ablation flag).
+        override: the CLI's answer, None meaning "let the config decide".
+    Returns:
+        True to ablate.
+    """
+    return config.get("evaluation", {}).get("ablation", False) if override is None else override
+
+
 def evaluate_run(run_dir: Path, with_ablation: bool | None = None, plot: bool = False) -> dict:
-    """Orchestrate: load run, baseline, optional ablations, print, save, plot."""
+    """Score one finished run.
+
+    Args:
+        run_dir: the directory holding its config and checkpoint.
+        with_ablation: force the ablation suite on/off; None follows the config.
+        plot: also show the first predicted portion.
+    Returns:
+        The results dict, also written to run_dir/evaluation.json and printed.
+    """
     config, checkpoint = _find_run_files(run_dir)
     print(f"Loading checkpoint from {checkpoint}")
     inputs, outputs = _val_arrays(config)
 
     results, yhat, target = _baseline_results(config, checkpoint, inputs, outputs)
-    # ablation on/off comes from the config's evaluation: section; CLI forces it
-    if config.get("evaluation", {}).get("ablation", False) if with_ablation is None else with_ablation:
-        results["ablation"] = _ablation_results(config, checkpoint, inputs, outputs)
-    else:
-        results["ablation"] = {}
+    results["ablation"] = (_ablation_results(config, checkpoint, inputs, outputs)
+                           if _wants_ablation(config, with_ablation) else {})
 
     _print_results(results)
     _save_results(run_dir, results)
@@ -199,6 +335,11 @@ def evaluate_run(run_dir: Path, with_ablation: bool | None = None, plot: bool = 
 
 
 def main() -> None:
+    """CLI entrypoint: evaluate the run dir given by --run.
+
+    Returns:
+        Nothing; see evaluate_run for what is printed and written.
+    """
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--run", type=Path, required=True, help="run directory (config.yaml + .ckpt)")
     ap.add_argument("--ablation", action="store_true",

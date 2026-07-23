@@ -51,8 +51,17 @@ DROPPED = ["timestamps", "latitude", "longitude", "altitude",
 
 
 def rename_columns(df: pd.DataFrame, column_map: dict = COLUMN_MAP) -> pd.DataFrame:
-    """Apply COLUMN_MAP, failing loudly on a delivery that lacks a source column
-    (a silent rename miss would surface much later as a cryptic build error)."""
+    """Give the delivery's columns the names the repo already uses.
+
+    Args:
+        df: the delivered frame.
+        column_map: delivery name -> repo name.
+    Returns:
+        A renamed copy; values are never touched.
+    Raises:
+        SystemExit: a source column is absent -- a silent rename miss would
+            surface much later as a cryptic build error.
+    """
     missing = [c for c in column_map if c not in df.columns]
     if missing:
         raise SystemExit(f"the simulation csv lacks the expected columns {missing}")
@@ -60,14 +69,28 @@ def rename_columns(df: pd.DataFrame, column_map: dict = COLUMN_MAP) -> pd.DataFr
 
 
 def drop_unused(df: pd.DataFrame, columns: list[str] = DROPPED) -> pd.DataFrame:
-    """Drop the columns no input set uses. Kept explicit rather than implicit:
-    the canonical csv should show what was deliberately left out."""
+    """Drop what no input set uses, explicitly rather than implicitly: the
+    canonical csv should show what was deliberately left out.
+
+    Args:
+        df: the renamed frame.
+        columns: columns to drop; those already absent are ignored.
+    Returns:
+        A copy without them.
+    """
     return df.drop(columns=[c for c in columns if c in df.columns])
 
 
 def runway_key(value) -> str:
-    """Canonical runway designator: '7' and '07' must be the same key whichever
-    way pandas happened to type the column in each of the two csv."""
+    """Canonical runway designator, so '7' and '07' are one key whichever way
+    pandas happened to type the column in each of the two csv.
+
+    Args:
+        value: the designator as read.
+    Returns:
+        Two digits plus the L/R/C suffix ('07R'); the text upper-cased and
+        stripped when it holds no digit at all.
+    """
     text = str(value).strip().upper()
     digits = "".join(c for c in text if c.isdigit())
     suffix = "".join(c for c in text if c.isalpha())
@@ -75,19 +98,40 @@ def runway_key(value) -> str:
 
 
 def airport_keys(df: pd.DataFrame, airport="airport", runway="runway") -> set[tuple[str, str]]:
-    """The (airport, runway) pairs a table holds, canonicalised."""
+    """The (airport, runway) pairs a table holds.
+
+    Args:
+        df: any table with an airport and a runway column.
+        airport, runway: their names in that table.
+    Returns:
+        The canonicalised pairs, comparable across tables.
+    """
     return {(str(a).strip().upper(), runway_key(r))
             for a, r in zip(df[airport], df[runway])}
 
 
 def missing_runways(sims: pd.DataFrame, airports: pd.DataFrame) -> list[tuple[str, str]]:
-    """Runways flown in the simulations that the airport table does not cover."""
+    """The cheap check that catches a truncated or mismatched delivery.
+
+    Args:
+        sims: the prepared simulation frame.
+        airports: the airport table.
+    Returns:
+        The (airport, runway) pairs flown but absent from the table, sorted.
+    """
     return sorted(airport_keys(sims) - airport_keys(airports, "airport", "runway"))
 
 
 def prepare(sims: pd.DataFrame, airports: pd.DataFrame) -> tuple[pd.DataFrame, list]:
-    """(canonical dataframe, uncovered runways). The airport table is a check
-    only -- no column of it enters the dataset."""
+    """The contract data/prepare.py dispatches to.
+
+    Args:
+        sims: the delivered simulation frame.
+        airports: the airport table -- a check only, no column of it enters the
+            dataset.
+    Returns:
+        (canonical frame sorted by run then time, uncovered runways).
+    """
     df = drop_unused(rename_columns(sims))
     return df.sort_values(["simulationindex", "time"]).reset_index(drop=True), \
         missing_runways(df, airports)

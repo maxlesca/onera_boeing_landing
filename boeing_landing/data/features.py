@@ -116,9 +116,19 @@ LABEL_SETS = {"commands": LABELS, "commands_full": LABELS_FULL}
 OPTIONAL_COLUMNS = ["image_filename"]
 
 def extend_order(order: list[str], available: list[str]) -> list[str]:
-    """`order` completed with the channels the dataset holds beyond it (e.g.
-    extra_columns), appended in dataset order. The named orders therefore
-    stay dataset-agnostic. Names unknown to the dataset are an error (typo guard)."""
+    """Complete a named channel order with what the dataset holds beyond it, so
+    the orders below stay dataset-agnostic.
+
+    Args:
+        order: the named channel order (a permutation of an input set).
+        available: the channels the npz actually carries, in its own order.
+    Returns:
+        `order` followed by every remaining channel of `available` (e.g. the
+        pipeline's extra_columns), in dataset order.
+    Raises:
+        ValueError: `order` names a channel the dataset does not have -- the
+            typo guard, since such a name would otherwise be silently dropped.
+    """
     unknown = set(order) - set(available)
     if unknown:
         raise ValueError(f"channels not in the dataset: {sorted(unknown)}")
@@ -126,7 +136,14 @@ def extend_order(order: list[str], available: list[str]) -> list[str]:
 
 
 def random_order(seed: int) -> list[str]:
-    """A reproducible random permutation of the canonical inputs."""
+    """A control arm for the conv-ordering study: no physical grouping at all.
+
+    Args:
+        seed: the permutation is reproducible from it, so a named random order
+            means the same channel sequence on every machine and every rerun.
+    Returns:
+        A permutation of CANONICAL_INPUTS.
+    """
     rng = np.random.default_rng(seed)
     return [CANONICAL_INPUTS[i] for i in rng.permutation(len(CANONICAL_INPUTS))]
 

@@ -40,11 +40,19 @@ DEFAULT_CONFIG = PROJECT_ROOT / "boeing_landing" / "pipelines" / "gps_cfc" / "ba
 
 
 def _resolve_order(dataset_cfg: dict) -> list[str]:
-    """The named channel order, extended with the dataset's own extra channels
-    (extra_columns) so labels always match the real tensors.
+    """The channel order a config asks for, as actual channel names.
 
-    An unknown name is fatal: falling back to the default would train a second
-    copy of the grouped arm, filed under the name that was asked for."""
+    Args:
+        dataset_cfg: the config's dataset section, read for `input_order`
+            (default 'grouped') and `train_npz`.
+    Returns:
+        The named order extended with the dataset's own extra channels
+        (extra_columns), so the labels always match the real tensors.
+    Raises:
+        SystemExit: the name is not in FEATURE_ORDERS. Falling back to the
+            default would train a second copy of the grouped arm, filed under
+            the name that was asked for.
+    """
     name = dataset_cfg.get("input_order", "grouped")
     if name not in FEATURE_ORDERS:
         raise SystemExit(f"unknown input_order {name!r}; choose from {sorted(FEATURE_ORDERS)}")
@@ -53,15 +61,29 @@ def _resolve_order(dataset_cfg: dict) -> list[str]:
 
 
 def _npz_labels(dataset_cfg: dict) -> list[str]:
-    """The command channels the npz was built with. The npz is the source of
-    truth (label_names travels with the data), so a pipeline that changed
-    build.label_set cannot be trained against a stale list."""
+    """The command channels the npz was actually built with.
+
+    Args:
+        dataset_cfg: the config's dataset section, read for `train_npz`.
+    Returns:
+        Its label_names -- the npz is the source of truth here, so a pipeline
+        that changed build.label_set cannot be trained against a stale list --
+        falling back to LABELS only for a npz built before label_names existed.
+    """
     npz = np.load(dataset_cfg["train_npz"], allow_pickle=True)
     return [str(n) for n in npz["label_names"]] if "label_names" in npz else list(LABELS)
 
 
 def _sequence(x, y, seq_len: int):
-    """Tudor's sliding-window sequencing; seq_len=1 keeps one conv frame."""
+    """Tudor's sliding-window sequencing.
+
+    Args:
+        x, y: the portion tensors.
+        seq_len: window length; 1 keeps one conv frame (the baseline recipe),
+            <= 0 skips the transform entirely.
+    Returns:
+        (x, y) windowed, the labels trimmed to the frames a full window covers.
+    """
     if seq_len <= 0:
         return x, y
     return transform_to_sequence(x, seq_len), y[:, :, seq_len - 1:]
@@ -70,12 +92,34 @@ def _sequence(x, y, seq_len: int):
 def _load_split(npz_path: str, order: list[str], portion_len: int, stride: int,
                 seq_len: int, use_dt: bool = False, noise_std: float = 0.0,
                 seed: int = 42):
+    """One split, from npz to sequenced tensors.
+
+    Args:
+        npz_path: the split to load.
+        order: channel order (see _resolve_order).
+        portion_len, stride: the portion cutting (see data.loader).
+        seq_len: sequencing window (see _sequence).
+        use_dt: append the per-frame dt channel for the CfC timespans.
+        noise_std: sigma of the input perturbation; 0 disables it.
+        seed: seed of that perturbation.
+    Returns:
+        (x, y), ready for DatasetController.
+    """
     x, y = load_portions(npz_path, order, portion_len=portion_len, stride=stride,
                          use_dt=use_dt, noise_std=noise_std, seed=seed)
     return _sequence(x, y, seq_len)
 
 
 def _dataloaders(config: dict):
+    """Both dataloaders and the model's I/O dimensions, from a config alone.
+
+    Args:
+        config: the resolved pipeline config (dataset + dataloader sections).
+    Returns:
+        (train_loader, val_loader, input_dim, output_dim). The dt channel is
+        split off as timespans before the model sees the data, so it does not
+        count in input_dim (same convention as the baseline).
+    """
     d = config["dataset"]
     order = _resolve_order(d)
     seq_len = int(config["sequencing"]["seq_len"]) if config.get("sequencing", {}).get("value") else 0
@@ -91,29 +135,54 @@ def _dataloaders(config: dict):
     lc = config["dataloader"]
     kw = dict(batch_size=lc["batch_size"], num_workers=lc["num_workers"],
               pin_memory=lc["pin_memory"], drop_last=lc["drop_last"])
-    # the dt channel is split off as timespans before the model sees the data,
-    # so it does not count as a model input (same convention as the baseline)
     input_dim = int(train_set.input.shape[-1]) - (1 if use_dt else 0)
     return (torch.utils.data.DataLoader(train_set, shuffle=True, **kw),
             torch.utils.data.DataLoader(val_set, shuffle=False, **kw),
             input_dim, int(train_set.output.shape[-1]))
 
 
-def _inject_labels(config: dict) -> None:
-    """Lightning_Model reads input_labels/output_labels; 'dt' at the end turns
-    on its with_time path (the dt channel becomes the CfC timespans)."""
+def _with_dataset(config: dict, **fields) -> dict:
+    """Set fields in a config's dataset section without touching the caller's.
+
+    Args:
+        config: the resolved config.
+        fields: dataset keys to add or replace.
+    Returns:
+        A shallow copy carrying them, so a sweep can derive one config per arm
+        from a single base without the arms bleeding into each other.
+    """
+    return {**config, "dataset": {**config["dataset"], **fields}}
+
+
+def with_labels(config: dict) -> dict:
+    """Name the channels for Lightning_Model, which reads input_labels and
+    output_labels off the config.
+
+    Args:
+        config: the resolved config.
+    Returns:
+        A copy whose dataset section carries both lists; a trailing 'dt' in the
+        inputs is what turns on the model's with_time path (that channel then
+        becomes the CfC timespans).
+    """
     labels = list(_resolve_order(config["dataset"]))
     if config["dataset"].get("use_dt", False):
         labels.append("dt")
-    config["dataset"]["input_labels"] = labels
-    config["dataset"]["output_labels"] = _npz_labels(config["dataset"])
+    return _with_dataset(config, input_labels=labels,
+                         output_labels=_npz_labels(config["dataset"]))
 
 
 def _run_dir(project_root: Path, config: dict) -> Path:
-    """One folder per run: runs/<pipeline>/<variant>/<timestamp>/ -- one
-    subfolder per pipeline yaml (checkpoint_name), one per variant inside it
-    (input order, optionally prefixed by a run_tag such as seed43). Never
-    shared, never overwritten across pipelines/iterations."""
+    """Reserve this run's own output folder.
+
+    Args:
+        project_root: repo root holding runs/.
+        config: read for `checkpoint_name` (the pipeline), the dataset's
+            `input_order` and the optional `run_tag` (e.g. seed43).
+    Returns:
+        A fresh runs/<pipeline>/<[tag_]order>/<timestamp>/ directory, created.
+        Never shared, never overwritten across pipelines or iterations.
+    """
     base = config.get("checkpoint_name") or "run"
     order = config["dataset"].get("input_order", "grouped")
     tag = config.get("run_tag")
@@ -124,18 +193,35 @@ def _run_dir(project_root: Path, config: dict) -> Path:
 
 
 def assemble(config: dict):
-    """Build (model, train_loader, val_loader) from a config, filling I/O dims."""
+    """Turn a config into everything a fit needs.
+
+    Args:
+        config: the resolved config, labels already named (see with_labels).
+    Returns:
+        (model, train_loader, val_loader, config), the returned config being a
+        copy carrying the measured I/O dimensions -- the model was built from
+        that copy, and it is the one to archive next to the checkpoint.
+    """
     train_loader, val_loader, input_dim, output_dim = _dataloaders(config)
-    config["dataset"]["input_dim"] = config["dataset"]["input_size"] = input_dim
-    config["dataset"]["output_dim"] = config["dataset"]["output_size"] = output_dim
-    network = build_controller_network(config, input_dim, output_dim)
-    return model_for(config, network), train_loader, val_loader
+    resolved = _with_dataset(config, input_dim=input_dim, input_size=input_dim,
+                             output_dim=output_dim, output_size=output_dim)
+    network = build_controller_network(resolved, input_dim, output_dim)
+    return model_for(resolved, network), train_loader, val_loader, resolved
 
 
 class GradNorm(L.Callback):
     """Log the total L2 gradient norm each step (training-stability signal)."""
 
     def on_before_optimizer_step(self, trainer, pl_module, optimizer):
+        """Log `grad_norm` just before the weights move.
+
+        Args:
+            trainer: the Lightning trainer (unused).
+            pl_module: the model whose gradients are read.
+            optimizer: the optimizer about to step (unused).
+        Returns:
+            Nothing; the norm goes to the metrics log.
+        """
         grads = [p.grad.norm(2) for p in pl_module.parameters() if p.grad is not None]
         if grads:
             pl_module.log("grad_norm", torch.stack(grads).norm(2))
@@ -145,14 +231,38 @@ class EpochTimer(L.Callback):
     """Log the wall time of every training epoch."""
 
     def on_train_epoch_start(self, trainer, pl_module):
+        """Start the stopwatch.
+
+        Args:
+            trainer, pl_module: Lightning's hook arguments (unused).
+        Returns:
+            Nothing.
+        """
         self._t0 = time.time()
 
     def on_train_epoch_end(self, trainer, pl_module):
+        """Log `epoch_time_s`.
+
+        Args:
+            trainer: the Lightning trainer (unused).
+            pl_module: the model the metric is logged on.
+        Returns:
+            Nothing.
+        """
         pl_module.log("epoch_time_s", time.time() - self._t0)
 
 
 def _callbacks(config: dict, run_dir: Path):
-    """Best-val checkpoint into run_dir, metric loggers, optional early stopping."""
+    """The callbacks a run needs.
+
+    Args:
+        config: read for the scheduler block and
+            training.early_stopping_patience.
+        run_dir: where the best checkpoint is written.
+    Returns:
+        (callbacks, checkpoint_callback) -- the second is returned separately
+        because the summary reads the best score off it.
+    """
     checkpoint = ModelCheckpoint(monitor="val_loss", dirpath=str(run_dir),
                                  filename="{epoch:02d}_{val_loss:.6f}",
                                  save_top_k=1, mode="min")
@@ -168,7 +278,16 @@ def _callbacks(config: dict, run_dir: Path):
 
 
 def _trainer(config: dict, run_dir: Path, callbacks) -> L.Trainer:
-    """Trainer from the config knobs (hardware, precision, gradient clipping)."""
+    """Build the Lightning trainer from the config's hardware and logging knobs.
+
+    Args:
+        config: read for the training section (epochs, accelerator, devices,
+            precision, gradient clipping, logging rate).
+        run_dir: default root dir, so the logs land with the checkpoint.
+        callbacks: what _callbacks returned.
+    Returns:
+        The configured trainer.
+    """
     t = config["training"]
     # log_every_n_steps > 0: metrics.csv written at that rate; 0: no logging at
     # all (checkpointing/early stopping still work, they read metrics in memory)
@@ -184,7 +303,17 @@ def _trainer(config: dict, run_dir: Path, callbacks) -> L.Trainer:
 
 
 def _summary(model, trainer, checkpoint, wall_time_s: float) -> dict:
-    """Key facts of a finished run, saved as summary.json next to the checkpoint."""
+    """Key facts of a finished run.
+
+    Args:
+        model: the trained module, counted for its parameters.
+        trainer: the finished trainer, read for the epochs actually run.
+        checkpoint: the ModelCheckpoint holding the best score and path.
+        wall_time_s: fit duration in seconds.
+    Returns:
+        The dict saved as summary.json next to the checkpoint -- best val_loss
+        and its epoch, epochs run, wall time, parameter count, file name.
+    """
     best = Path(checkpoint.best_model_path)
     epoch = re.search(r"epoch=(\d+)", best.stem)
     return {
@@ -198,8 +327,20 @@ def _summary(model, trainer, checkpoint, wall_time_s: float) -> dict:
 
 
 def fit_and_save(model, train_loader, val_loader, config: dict, project_root: Path) -> Path:
-    """Train `model` into its own run dir (checkpoint + config + summary).
-    Generic: any pipeline's entrypoint can reuse this."""
+    """Train a model into its own run dir. Generic: any pipeline's entrypoint
+    can reuse this.
+
+    Args:
+        model: the Lightning module to fit.
+        train_loader, val_loader: its data.
+        config: the resolved config, archived as config.yaml -- it must be the
+            one the model was built from, or evaluation would later rebuild a
+            different network.
+        project_root: repo root holding runs/.
+    Returns:
+        Path of the best checkpoint; the run dir also gets config.yaml and
+        summary.json.
+    """
     run_dir = _run_dir(project_root, config)
     callbacks, checkpoint = _callbacks(config, run_dir)
     trainer = _trainer(config, run_dir, callbacks)
@@ -215,16 +356,33 @@ def fit_and_save(model, train_loader, val_loader, config: dict, project_root: Pa
 
 
 def train_config(config: dict, project_root: Path) -> Path:
-    """Config dict -> trained checkpoint. Orchestrates assemble + fit_and_save."""
+    """Config dict -> trained checkpoint. Orchestrates assemble + fit_and_save.
+
+    Args:
+        config: the resolved config, left untouched -- the labels and dims the
+            run needs are added to a copy, which is what gets archived.
+        project_root: repo root holding runs/.
+    Returns:
+        Path of the best checkpoint.
+    """
     torch.manual_seed(int(config.get("training", {}).get("seed", 42)))
-    _inject_labels(config)
-    model, train_loader, val_loader = assemble(config)
-    return fit_and_save(model, train_loader, val_loader, config, project_root)
+    model, train_loader, val_loader, resolved = assemble(with_labels(config))
+    return fit_and_save(model, train_loader, val_loader, resolved, project_root)
 
 
 def train(config_path: Path, project_root: Path = PROJECT_ROOT,
           input_order: str | None = None, max_epochs: int | None = None) -> Path:
-    """Same from a YAML path, with optional launch-time overrides."""
+    """Same, starting from a yaml path.
+
+    Args:
+        config_path: the pipeline config (extends resolved by load_pipeline_config).
+        project_root: repo root holding runs/.
+        input_order: launch-time override of the channel order, which is what
+            lets the order sweep run one arm per order off a single yaml.
+        max_epochs: launch-time override of the epoch count (quick trials).
+    Returns:
+        Path of the best checkpoint.
+    """
     config = load_pipeline_config(config_path)
     if input_order:
         config["dataset"]["input_order"] = input_order
@@ -234,12 +392,24 @@ def train(config_path: Path, project_root: Path = PROJECT_ROOT,
 
 
 def val_loss_from_checkpoint(ckpt: Path) -> float:
-    """Read the val_loss back from the checkpoint filename (our naming contract)."""
+    """Read a run's score straight off its checkpoint name (our naming contract
+    in _callbacks), so a sweep needs no second inference pass.
+
+    Args:
+        ckpt: the checkpoint path.
+    Returns:
+        The val_loss it encodes, NaN when the name does not carry one.
+    """
     m = re.search(r"val_loss=([0-9.]+)", ckpt.stem)
     return float(m.group(1)) if m else float("nan")
 
 
 def main() -> None:
+    """CLI entrypoint: train the config given by --config.
+
+    Returns:
+        Nothing; the run dir holds the checkpoint, config and summary.
+    """
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--config", type=Path, default=DEFAULT_CONFIG)
     ap.add_argument("--project-root", type=Path, default=PROJECT_ROOT)

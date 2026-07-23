@@ -26,22 +26,46 @@ import pymap3d as pm
 
 
 def geodetic_to_ned(lat, lon, h, lat0, lon0, h0) -> np.ndarray:
-    """WGS84 geodetic (radians, meters) -> local NED meters at (lat0, lon0, h0),
-    shape (..., 3). Wraps pymap3d.geodetic2ned (steps 1 and 2)."""
+    """Geodetic coordinates expressed in the local NED frame of a reference point.
+
+    Wraps pymap3d.geodetic2ned (steps 1 and 2 above).
+
+    Args:
+        lat, lon: WGS84 latitude/longitude in radians, scalars or arrays.
+        h: ellipsoidal height in meters, broadcastable with lat/lon.
+        lat0, lon0, h0: the reference point the frame is centred on (rad, rad, m).
+    Returns:
+        Array of shape (..., 3): north, east and down offsets in meters.
+    """
     n, e, d = pm.geodetic2ned(lat, lon, h, lat0, lon0, h0, deg=False)
     return np.stack([n, e, d], axis=-1)
 
 
 def bearing(lat0, lon0, h0, lat, lon, h) -> float:
-    """True course (rad from north) from (lat0,lon0) to (lat,lon): the azimuth of
-    pymap3d.geodetic2aer, folded to (-pi, pi]."""
+    """True course from one geodetic point to another.
+
+    Args:
+        lat0, lon0, h0: origin of the course (rad, rad, m).
+        lat, lon, h: point aimed at (rad, rad, m).
+    Returns:
+        The azimuth of pymap3d.geodetic2aer in radians from north, folded to
+        (-pi, pi].
+    """
     az, _, _ = pm.geodetic2aer(lat, lon, h, lat0, lon0, h0, deg=False)
     return float((az + np.pi) % (2 * np.pi) - np.pi)
 
 
 def norm_qfu(qfu: str) -> str:
-    """Runway designator without zero padding ('07R' -> '7R'): the database
-    mixes both spellings."""
+    """Runway designator stripped of its zero padding, so the two spellings the
+    database mixes ('07R' and '7R') resolve to one key.
+
+    Args:
+        qfu: designator as written in a csv or in the nav database.
+    Returns:
+        The digits without leading zeros, plus the L/R/C suffix if any.
+    Raises:
+        SystemExit: the designator does not parse.
+    """
     m = re.fullmatch(r"0*(\d+)\s*([LRC]?)", str(qfu).strip().upper())
     if not m:
         raise SystemExit(f"unparseable runway designator: {qfu!r}")
@@ -49,8 +73,16 @@ def norm_qfu(qfu: str) -> str:
 
 
 def runway_heading(designator: str) -> float:
-    """Magnetic bearing (rad) the runway number encodes: '02' -> 020deg,
-    '34L' -> 340deg. The QFU is a magnetic heading rounded to 10deg."""
+    """The magnetic bearing a runway number encodes: '02' -> 020deg,
+    '34L' -> 340deg. The QFU is a magnetic heading rounded to 10deg.
+
+    Args:
+        designator: runway designator, padded or not, with or without suffix.
+    Returns:
+        That bearing in radians.
+    Raises:
+        SystemExit: the designator does not parse.
+    """
     m = re.fullmatch(r"0*(\d+)\s*[LRC]?", str(designator).strip().upper())
     if not m:
         raise SystemExit(f"unparseable runway designator: {designator!r}")
@@ -58,8 +90,14 @@ def runway_heading(designator: str) -> float:
 
 
 def load_navdb(path: Path) -> dict[tuple[str, str], dict]:
-    """{(airport, qfu): {ltp: (lat rad, lon rad, alt m), fpap: (lat rad, lon rad),
-    designator: str}}."""
+    """Flatten the NavDB json into one entry per approach.
+
+    Args:
+        path: NavDB json, nested airport -> QFU -> runway record (degrees).
+    Returns:
+        {(airport, normalised qfu): {"ltp": (lat rad, lon rad, alt m),
+        "fpap": (lat rad, lon rad), "designator": the qfu as spelled}}.
+    """
     db = json.loads(path.read_text())
     return {(airport.strip(), norm_qfu(qfu)):
             {"ltp": (np.radians(e["lat_ltp_ftp"]), np.radians(e["long_ltp_ftp"]),
@@ -70,9 +108,15 @@ def load_navdb(path: Path) -> dict[tuple[str, str], dict]:
 
 
 def approach_course(entry: dict) -> float:
-    """True course of the approach (rad, from north), bearing LTP -> FPAP: the
-    FPAP is the alignment point of the approach, so this is the direction the
-    aircraft travels at the threshold whichever QFU is flown."""
+    """Direction the aircraft travels at the threshold, whichever QFU is flown:
+    the FPAP is the alignment point of the approach, so the LTP -> FPAP bearing
+    is the approach axis itself.
+
+    Args:
+        entry: one nav database entry (see load_navdb), read for ltp and fpap.
+    Returns:
+        That true course in radians from north.
+    """
     lat0, lon0, alt0 = entry["ltp"]
     lat_f, lon_f = entry["fpap"]
     return bearing(lat0, lon0, alt0, lat_f, lon_f, alt0)

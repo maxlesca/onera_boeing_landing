@@ -28,10 +28,21 @@ import pandas as pd
 
 
 def load_source(path: Path) -> pd.DataFrame:
-    """Read a delivery csv, accepting either separator: deliveries have arrived
-    both ',' and ';' separated, and guessing wrong yields a single-column frame.
-    The separator is sniffed on the header alone (the python engine cannot take
-    low_memory, and these files are large enough for that to matter)."""
+    """Read a delivery csv whatever separator it arrived with.
+
+    Deliveries have come both ',' and ';' separated, and guessing wrong yields
+    a single-column frame. The separator is sniffed on the header alone: the
+    python engine cannot take low_memory, and these files are large enough for
+    that to matter.
+
+    Args:
+        path: the delivery csv.
+    Returns:
+        The frame as delivered.
+    Raises:
+        SystemExit: it parsed into fewer than two columns, i.e. the sniff was
+            wrong or the file is not a csv.
+    """
     with path.open("r", encoding="utf-8") as handle:
         header = handle.readline()
     sep = ";" if header.count(";") > header.count(",") else ","
@@ -43,7 +54,22 @@ def load_source(path: Path) -> pd.DataFrame:
 
 def run_prepare(config: dict, sims: Path | None, side: Path | None,
                 output: Path | None) -> Path:
-    """Dispatch to the pipeline's preparation module and write its output csv."""
+    """Dispatch to the pipeline's preparation module and write its output csv.
+
+    Args:
+        config: the resolved pipeline config, read for its `prepare:` block
+            (module, sims_csv, side_csv, out_csv).
+        sims: simulation csv; None takes the block's sims_csv.
+        side: side table (e.g. the airport info); None takes side_csv.
+        output: csv to write; None takes out_csv.
+    Returns:
+        Path of the canonical csv. Whatever the module reports as suspicious is
+        printed as a warning, not raised -- the check is there to catch a
+        truncated delivery, not to block one.
+    Raises:
+        SystemExit: the config declares no preparation, or the output would
+            overwrite one of the inputs.
+    """
     cfg = config.get("prepare")
     if not cfg:
         raise SystemExit("this config has no `prepare:` section -- its pipeline reads "
@@ -68,6 +94,11 @@ def run_prepare(config: dict, sims: Path | None, side: Path | None,
 
 
 def main() -> None:
+    """CLI entrypoint: run the preparation on its own.
+
+    Returns:
+        Nothing; see run_prepare for what is written.
+    """
     from boeing_landing.config import load_config
     from boeing_landing.train import DEFAULT_CONFIG
 

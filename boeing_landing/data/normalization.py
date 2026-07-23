@@ -52,7 +52,15 @@ BOUNDS_FILE = Path(__file__).with_name("physical_bounds.yaml")
 
 
 def load_bounds_file(path: Path = BOUNDS_FILE) -> tuple[dict, dict]:
-    """The (core, extended) tiers of `path`, each as {channel: (min, max)}."""
+    """Read the fixed-bounds yaml.
+
+    Args:
+        path: yaml holding a `core:` and an `extended:` mapping of
+            channel -> [min, max] (defaults to physical_bounds.yaml).
+    Returns:
+        The (core, extended) tiers, each as {channel: (min, max)} floats; a tier
+        the file omits comes back empty.
+    """
     raw = load_yaml(path)
     return tuple({channel: (float(lo), float(hi))
                   for channel, (lo, hi) in (raw.get(tier) or {}).items()}
@@ -66,49 +74,99 @@ PHYSICAL_BOUNDS = _CORE_BOUNDS
 
 
 def bounds_table(mode) -> dict:
-    """Fixed-bounds table for build.physical_bounds `mode`: 'all' adds the
-    extended tier (wind/velocities/rates); anything else truthy = core only."""
+    """The fixed bounds a pipeline selected.
+
+    Args:
+        mode: the `build.physical_bounds` value -- 'all' takes both tiers,
+            anything else truthy takes the core tier.
+    Returns:
+        {channel: (min, max)} for the channels that tier fixes; every other
+        channel falls back to its train statistic in resolve_bounds.
+    """
     if mode == "all":
         return {**_CORE_BOUNDS, **_EXTENDED_BOUNDS}
     return _CORE_BOUNDS
 
 
+def _encoded_column(df, name: str):
+    """The values of one *_sin/*_cos channel, from its source angle.
+
+    Args:
+        df: frame holding the source column (ANGLE_ENCODINGS).
+        name: the encoded channel to compute.
+    Returns:
+        The encoded Series.
+    Raises:
+        SystemExit: the source angle is not in the frame.
+    """
+    src, fn = ANGLE_ENCODINGS[name]
+    if src not in df.columns:
+        raise SystemExit(f"cannot encode {name!r}: source column {src!r} is missing")
+    return fn(df[src].astype(float))
+
+
 def add_angle_encodings(df, columns):
-    """Add every *_sin/*_cos channel requested in `columns`, each derived from its
-    source angle (ANGLE_ENCODINGS). No-op for channels that need no encoding, so
-    input sets that keep the raw heading (gps) are untouched."""
-    for name in columns:
-        spec = ANGLE_ENCODINGS.get(name)
-        if spec and name not in df.columns:
-            src, fn = spec
-            if src not in df.columns:
-                raise SystemExit(f"cannot encode {name!r}: source column {src!r} is missing")
-            df[name] = fn(df[src].astype(float))
-    return df
+    """Derive the sin/cos channels an input set asks for.
+
+    Args:
+        df: source frame, left untouched.
+        columns: the channels the input set wants; those that need no encoding
+            are ignored, so a set keeping the raw heading (gps) changes nothing.
+    Returns:
+        A frame with the missing *_sin/*_cos columns appended (df itself when
+        there is nothing to add).
+    """
+    encoded = {name: _encoded_column(df, name) for name in columns
+               if name in ANGLE_ENCODINGS and name not in df.columns}
+    return df.assign(**encoded) if encoded else df
+
+
+def _column_bounds(train, column: str, table: dict) -> tuple[float, float]:
+    """(min, max) of one column: the fixed bound when the table has one for it,
+    else the train-split extrema.
+
+    Args:
+        train: the training frame.
+        column: column to bound.
+        table: fixed bounds in play (see bounds_table); empty = data-driven only.
+    Returns:
+        The (min, max) pair.
+    """
+    if column in table:
+        return table[column]
+    return float(train[column].min()), float(train[column].max())
 
 
 def resolve_bounds(train, columns, physical) -> tuple[list, list]:
-    """Per-column (min, max): the fixed physical bound when `physical` is truthy
-    and the column has one in the selected tier (see bounds_table), else the
-    train-split min/max. Returns two aligned lists."""
+    """Min-max normalisation params of several columns.
+
+    Args:
+        train: the training frame (bounds are never fit on validation).
+        columns: columns to resolve, in order.
+        physical: `build.physical_bounds` -- falsy for data-driven bounds only.
+    Returns:
+        Two lists aligned with `columns`: the mins and the maxes.
+    """
     table = bounds_table(physical) if physical else {}
-    lo, hi = [], []
-    for c in columns:
-        if c in table:
-            a, b = table[c]
-        else:
-            a, b = float(train[c].min()), float(train[c].max())
-        lo.append(a)
-        hi.append(b)
-    return lo, hi
+    pairs = [_column_bounds(train, c, table) for c in columns]
+    return [lo for lo, _ in pairs], [hi for _, hi in pairs]
 
 
 def resolve_norm(train, columns, method: str = "minmax", physical=False) -> tuple[list, list]:
-    """Per-column (a, b) normalisation params for `method`:
-    - 'minmax': (min, max) -- the fixed physical bound where `physical` selects one;
-    - 'zscore': (mean, std) from the train split (physical is ignored -- z-score is
-      a mean/std rescale, not a min/max one).
-    The pair is stored in the npz; `normalize` reads `method` back to apply it."""
+    """Normalisation params of several columns, whatever the method.
+
+    The pair is stored in the npz; `normalize` reads `method` back to apply it.
+
+    Args:
+        train: the training frame.
+        columns: columns to resolve, in order.
+        method: 'minmax' or 'zscore'.
+        physical: fixed-bounds selector, honoured by minmax only -- a z-score is
+            a mean/std rescale, not a min/max one.
+    Returns:
+        Two lists aligned with `columns`: (min, max) per column for minmax,
+        (mean, std) for zscore.
+    """
     if method == "zscore":
         return ([float(train[c].mean()) for c in columns],
                 [float(train[c].std()) for c in columns])
@@ -116,10 +174,18 @@ def resolve_norm(train, columns, method: str = "minmax", physical=False) -> tupl
 
 
 def normalize(arr, a, b, method: str = "minmax"):
-    """Apply `method` with the two per-channel params (a, b) from resolve_norm:
-    - 'minmax': (x - a) / (b - a)  -> [0,1]      (a=min, b=max);
-    - 'zscore': (x - a) / b        -> mean 0, std 1  (a=mean, b=std).
-    The +1e-10 guards a channel that is constant on train."""
+    """Apply the normalisation whose params resolve_norm computed.
+
+    Args:
+        arr: raw values, last axis being the channels.
+        a, b: the per-channel params -- (min, max) for minmax, (mean, std) for
+            zscore -- broadcast against that last axis.
+        method: 'minmax' -> (x - a) / (b - a), roughly [0,1];
+            'zscore' -> (x - a) / b, mean 0 and std 1.
+    Returns:
+        The normalised array. The +1e-10 keeps a channel that is constant on
+        train from dividing by zero.
+    """
     a, b = np.asarray(a), np.asarray(b)
     if method == "zscore":
         return (arr - a) / (b + 1e-10)
