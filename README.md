@@ -130,8 +130,9 @@ make train CONFIG=<pipeline> [ORDER=...] [EPOCHS=n]
     # CONFIG: pipeline name (gps_cfc -> its base.yaml), pipeline/variant
     #         (gps_cfc/quick, gps_cfc/long) or path to a yaml.
     # ORDER: optional -- overrides the conv channel order set by the yaml's
-    #        dataset.input_order. Only for the ordering study: grouped, gps_first,
-    #        gps_last, pos_vel, by_axis, reversed, random_1..3 (see data/features.py).
+    #        dataset.input_order. Only for the ordering study: grouped, gps_last,
+    #        pos_vel, by_axis, reversed, random_1..3 (see data/features.py --
+    #        an unknown name is rejected, never silently replaced by the default).
     #        Each pipeline defaults to its own order, so it is not needed normally.
     # EPOCHS: override training.max_epochs for a quick trial (e.g. EPOCHS=3).
 
@@ -222,6 +223,7 @@ Data knobs:
 | `dataset.stride` | step between portions (overlap) |
 | `dataset.input_order` | conv channel order: `grouped`, `gps_last`, `pos_vel`, `by_axis`, `reversed`, `random_1..3` (dataset-only channels, e.g. extra_columns, are appended at the end) |
 | `dataset.use_dt` | append the per-frame time step as CfC timespans (baseline recipe) |
+| `dataset.with_noise` / `noise_std` | gaussian noise (sigma `noise_std`) on the normalised inputs of the TRAINING split only — behavioural cloning never sees off-trajectory states; validation stays clean so the score does not move with the seed |
 | `sequencing.seq_len` | 1 — the conv sees one frame at a time, over the feature axis |
 
 Changing `portion_len` / `stride` / `input_order` needs no npz rebuild.

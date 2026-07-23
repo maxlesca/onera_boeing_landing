@@ -23,8 +23,7 @@ import torch
 from lightning.pytorch.callbacks import (EarlyStopping, LearningRateMonitor,
                                          ModelCheckpoint)
 
-from boeing_landing.data.features import (CANONICAL_INPUTS, FEATURE_ORDERS, LABELS,
-                                          extend_order)
+from boeing_landing.data.features import FEATURE_ORDERS, LABELS, extend_order
 from boeing_landing.data.loader import load_portions
 from boeing_landing.config import load_pipeline_config
 from utils.scheduler import model_for, wants_schedule
@@ -42,10 +41,15 @@ DEFAULT_CONFIG = PROJECT_ROOT / "boeing_landing" / "pipelines" / "gps_cfc" / "ba
 
 def _resolve_order(dataset_cfg: dict) -> list[str]:
     """The named channel order, extended with the dataset's own extra channels
-    (extra_columns) so labels always match the real tensors."""
-    order = FEATURE_ORDERS.get(dataset_cfg.get("input_order", "grouped"), CANONICAL_INPUTS)
+    (extra_columns) so labels always match the real tensors.
+
+    An unknown name is fatal: falling back to the default would train a second
+    copy of the grouped arm, filed under the name that was asked for."""
+    name = dataset_cfg.get("input_order", "grouped")
+    if name not in FEATURE_ORDERS:
+        raise SystemExit(f"unknown input_order {name!r}; choose from {sorted(FEATURE_ORDERS)}")
     names = np.load(dataset_cfg["train_npz"], allow_pickle=True)["input_names"]
-    return extend_order(order, [str(n) for n in names])
+    return extend_order(FEATURE_ORDERS[name], [str(n) for n in names])
 
 
 def _npz_labels(dataset_cfg: dict) -> list[str]:
@@ -64,8 +68,10 @@ def _sequence(x, y, seq_len: int):
 
 
 def _load_split(npz_path: str, order: list[str], portion_len: int, stride: int,
-                seq_len: int, use_dt: bool = False):
-    x, y = load_portions(npz_path, order, portion_len=portion_len, stride=stride, use_dt=use_dt)
+                seq_len: int, use_dt: bool = False, noise_std: float = 0.0,
+                seed: int = 42):
+    x, y = load_portions(npz_path, order, portion_len=portion_len, stride=stride,
+                         use_dt=use_dt, noise_std=noise_std, seed=seed)
     return _sequence(x, y, seq_len)
 
 
@@ -74,7 +80,11 @@ def _dataloaders(config: dict):
     order = _resolve_order(d)
     seq_len = int(config["sequencing"]["seq_len"]) if config.get("sequencing", {}).get("value") else 0
     use_dt = bool(d.get("use_dt", False))
-    xtr, ytr = _load_split(d["train_npz"], order, int(d["portion_len"]), int(d["stride"]), seq_len, use_dt)
+    noise = float(d.get("noise_std", 0.0)) if d.get("with_noise") else 0.0
+    seed = int(config.get("training", {}).get("seed", 42))
+    xtr, ytr = _load_split(d["train_npz"], order, int(d["portion_len"]), int(d["stride"]),
+                           seq_len, use_dt, noise, seed)
+    # validation is never perturbed: the score must measure the model, not the seed
     xva, yva = _load_split(d["val_npz"], order, int(d["portion_len"]), int(d["stride"]), seq_len, use_dt)
 
     train_set, val_set = DatasetController(xtr, ytr), DatasetController(xva, yva)

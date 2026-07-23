@@ -51,10 +51,8 @@ dataset:
   input_order: ils_aligned # channel order for the conv (see features.FEATURE_ORDERS)
   use_dt: true           # per-frame dt -> CfC timespans (conv_cfc baseline recipe)
   normalized: true
-  with_noise: false
-  with_bias: false
-  with_delay: false
-  delay_steps: 2
+  with_noise: false        # gaussian noise on the normalised TRAINING inputs
+  noise_std: 0.01          # sigma, only read when with_noise is true
 
 mlp_block:
   value: false

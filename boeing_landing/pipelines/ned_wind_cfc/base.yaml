@@ -89,10 +89,8 @@ dataset:
   input_order: ned_wind    # channel order (features.FEATURE_ORDERS)
   use_dt: true             # per-frame dt -> CfC timespans
   normalized: true
-  with_noise: false
-  with_bias: false
-  with_delay: false
-  delay_steps: 2
+  with_noise: false        # gaussian noise on the normalised TRAINING inputs
+  noise_std: 0.01          # sigma, only read when with_noise is true
 
 # --- the encoder in front of the CfC ------------------------------------------
 # Default: none. The CfC already has its own backbone (128 units), the state is

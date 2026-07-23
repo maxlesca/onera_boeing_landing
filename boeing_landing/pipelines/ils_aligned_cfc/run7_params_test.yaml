@@ -14,21 +14,21 @@
 extends: base.yaml
 
 training:
-  max_epochs: 40             # On compense la baisse du LR par plus d'époques
-  lr: 0.0005                 # Divisé par 2 ou 10 (essayez 5e-4 ou 1e-4)
+  max_epochs: 40             # more epochs to compensate the lower lr
+  lr: 0.0005                 # half the base 0.001
   seed: 42
-  gradient_clip_val: 1.0     # Indispensable si le LR "rebondit"
+  gradient_clip_val: 1.0     # needed if the loss bounces
   early_stopping_patience: 8
 
 model:
-  no_neurons_layer: 128  # Plus de capacité
+  no_neurons_layer: 128  # more capacity (base: 64)
   backbone_layers: 2     # REQUIRED by the dropout below: ncps only inserts a
                          # Dropout *between* backbone layers, so with the
                          # default single layer backbone_dropout is silently
                          # ignored (the trap fixed in 8b6fb09 for run7_reg).
   backbone_units: 128
-  backbone_dropout: 0.1  # Anti-surapprentissage
-  mixed_memory: true     # Combine la stabilité LSTM aux dynamiques CfC
+  backbone_dropout: 0.1  # curbs memorisation of the training winds
+  mixed_memory: true     # LSTM stability on top of the CfC dynamics
 
 build:
   val_runs: [7]              # run 7 = wind outlier held out
@@ -40,6 +40,7 @@ build:
 dataset:
   train_npz: datasets/ils_aligned_cfc_run7_params_test/landing_train.npz
   val_npz: datasets/ils_aligned_cfc_run7_params_test/landing_val.npz
-  portion_len: 250       # Séquences plus longues (~10s)
-  stride: 12             # Plus de chevauchement pour multiplier les exemples
-  with_noise: true       # Crucial pour la robustesse en Behavior Cloning
+  portion_len: 250       # longer sequences (~10 s)
+  stride: 12             # more overlap -> more portions per run
+  with_noise: true       # robustness to the states the expert never visited
+  noise_std: 0.01        # sigma on the normalised inputs, training split only
