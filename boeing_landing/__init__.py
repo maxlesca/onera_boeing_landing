@@ -1,4 +1,4 @@
-"""Modular Boeing 737 landing pipeline (behavioural cloning).
+"""Modular Boeing 747 landing pipeline (behavioural cloning).
 
 Step 1:  inertial + GPS  ->  Conv1D  ->  CfC  ->  commands.
 Reuses Tudor's recurrent core (ConvCfC / CFC, utils/model_builder,

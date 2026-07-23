@@ -1,6 +1,6 @@
-# Boeing 737 landing — behavioural cloning
+# Boeing 747 landing — behavioural cloning
 
-Train a neural-network flight controller for Boeing 737 landing by cloning an
+Train a neural-network flight controller for Boeing 747 landing by cloning an
 expert autopilot from simulation data. The controller maps inertial state,
 GPS and wind to control commands through a 1D convolution and a closed-form
 continuous-time recurrent network (CfC). An image branch (CNN pretrained on

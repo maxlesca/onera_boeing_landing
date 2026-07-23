@@ -9,7 +9,7 @@ genere_par: maxime
 simulateur:
   msfs_version: "1.39.12.0"        # ⚠️ le décor dépend de la version (DOC §10.6-D2)
   schemin_version: ""
-  avion: "B737"                    # modèle de dynamique utilisé
+  avion: "B747"                    # modèle de dynamique utilisé (Speedgoat)
 
 scenario:
   aeroport_icao: ""                # ex. LFBO
