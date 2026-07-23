@@ -94,6 +94,38 @@ class ConvCfC(nn.Module):
         return self.rnn(x, hx, timespans)
 
 
+class TimespanCfC(nn.Module):
+    """Give a recurrent module the timespans shape ncps expects.
+
+    `ncps.torch.CfC` wants timespans broadcast to its state size: a (B, T, 1)
+    per-frame dt raises "The size of tensor a (units) must match the size of
+    tensor b (T)". ConvCfC already expands it, which is why the conv path is the
+    only one that ever worked with a dt channel; this wrapper does the same
+    expansion for the paths without a convolutional front end (a bare CfC, or
+    MLPCfC, which forwards timespans untouched).
+
+    Opt-in: model_builder only inserts it when the dataset appends a dt channel,
+    so networks built the way they were before keep the exact same state dict.
+    """
+
+    def __init__(self, rnn_module):
+        super().__init__()
+        self.rnn = rnn_module
+        # MLPCfC holds the recurrent core one level down, so the state size is
+        # looked up through the chain rather than on the wrapped module itself.
+        inner = rnn_module
+        while not hasattr(inner, "state_size") and hasattr(inner, "rnn"):
+            inner = inner.rnn
+        self.state_size = getattr(inner, "state_size", None)
+
+    def forward(self, x, hx=None, timespans=None):
+        if timespans is not None and self.state_size:
+            timespans = timespans.reshape(x.size(0), x.size(1), -1)
+            if timespans.shape[-1] == 1:
+                timespans = timespans.expand(-1, -1, self.state_size)
+        return self.rnn(x, hx, timespans)
+
+
 class MLPBlock(nn.Module):
     """
     Flexible MLP that accepts `(B, F)`, `(B, T, F)`, or `(B, T, S, F)` inputs.

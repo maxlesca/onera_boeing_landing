@@ -17,7 +17,7 @@ import torch
 
 
 from .feedforward import FeedForwardSequenceController
-from .liquid_networks import CFC, LTC, ConvCfC, MLPCfC
+from .liquid_networks import CFC, LTC, ConvCfC, MLPCfC, TimespanCfC
 from .standard_networks import CTRNN, GRU, LSTM, SimpleRNN
 
 
@@ -195,12 +195,19 @@ def build_controller_network(config: dict, input_dim: int, output_dim: int) -> t
     if model_type in {"mlp", "ff_mlp", "nn"}:
         return recurrent_module
 
+    # A dataset that appends a per-frame dt channel feeds timespans to the
+    # recurrent core, and ncps needs them expanded to its state size. ConvCfC
+    # below does that itself; the other paths need the wrapper. Gated on the flag
+    # so networks built without a dt channel keep their exact state dict.
+    with_timespans = bool(config.get("dataset", {}).get("use_dt", False))
+
     if mlp_cfg.get("value", False):
-        return MLPCfC(
+        mlp = MLPCfC(
             no_input=input_dim,
             layer_sizes=scaled_layers(mlp_cfg["no_layers"], scale_factor, minimum=1),
             rnn_module=recurrent_module,
         )
+        return TimespanCfC(mlp) if with_timespans else mlp
 
     if conv_cfg.get("value", False):
         if not config.get("sequencing", {}).get("value", False):
@@ -213,4 +220,4 @@ def build_controller_network(config: dict, input_dim: int, output_dim: int) -> t
             base_channels=scaled_int(conv_cfg.get("output_dim", 256), scale_factor, minimum=8),
         )
 
-    return recurrent_module
+    return TimespanCfC(recurrent_module) if with_timespans else recurrent_module
