@@ -57,9 +57,14 @@ def clean(df: pd.DataFrame, inputs: list[str], labels: list[str] = LABELS) -> pd
             f"CSV lacks the columns {missing}. The local-frame pipelines need the "
             f"AUGMENTED csv, which `make dataset` produces on its own from the "
             f"pipeline's prepare:/augment: block -- pass CSV=... only to override it.")
-    needed += [c for c in OPTIONAL_COLUMNS if c in df.columns]
+    # dropna on the REQUIRED columns only: an optional column (image_filename) is
+    # neither an input nor a label, so a hole in it must not cost a training frame.
     df = df.dropna(subset=needed).copy()
     print(f"{n_total} rows read, {n_total - len(df)} dropped (NaN), {len(df)} kept")
+    for col in (c for c in OPTIONAL_COLUMNS if c in df.columns):
+        if n_missing := int(df[col].isna().sum()):
+            print(f"  note: {col} empty on {n_missing} kept rows")
+            df[col] = df[col].fillna("")
     df["run"] = df["simulationindex"].astype(int)
     return df.sort_values(["run", "time"]).reset_index(drop=True)
 
@@ -71,8 +76,11 @@ def split_runs(df: pd.DataFrame, val_runs: set[int],
     study train on 30 of the 85 available runs. Left empty, training takes every
     run that is not held out (the historical behaviour)."""
     present = set(df["run"].unique())
-    if not val_runs & present:
-        raise SystemExit(f"none of the val runs {val_runs} exist (runs: {sorted(present)})")
+    # strict, like the train check below: val runs are picked one by one for what
+    # each tests, so validating on the survivors would drop a test case in silence
+    if missing := val_runs - present:
+        raise SystemExit(f"val runs absent from the csv (or dropped as NaN by clean): "
+                         f"{sorted(missing)} -- runs available: {sorted(present)}")
     val = df[df["run"].isin(val_runs)]
     if not train_runs:
         return df[~df["run"].isin(val_runs)], val
@@ -161,9 +169,16 @@ def _resolve_source(source: Path | None, config: dict, force: bool = False) -> P
     chain in one command instead of asking for the steps in the right order.
     An existing csv is reused as is; FORCE=1 rebuilds it.
     gps_cfc declares neither and must be given a source explicitly.
+
+    Declaring both is rejected rather than half-executed: only the first would
+    run, and build() would then fail on the columns the second was to produce.
+    The day a delivery needs both, make this an ordered list of steps.
     """
     if source is not None:
         return source
+    if all(config.get(s) for s in ("prepare", "augment")):
+        raise SystemExit("this config declares both a prepare: and an augment: step; "
+                         "only one upstream step is supported (see _resolve_source)")
     for section, run_step in (("prepare", _run_prepare), ("augment", _run_augment)):
         cfg = config.get(section)
         if not cfg:
