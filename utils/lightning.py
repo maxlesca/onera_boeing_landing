@@ -187,9 +187,12 @@ class Lightning_Model(L.LightningModule):
         self.all_runtime.append((end - start))
 
         loss = self._open_loop_loss(y_hat, y)
-        # Collect all target and prediction points
-        self.all_yhat.append(y_hat[0])
-        self.all_target.append(y[0])
+        # Collect every sample of the batch, not just the first one: metrics
+        # computed downstream (MSE, per-channel R2, ablations) must see the whole
+        # split. Keeping y_hat[0] scored one portion per batch, i.e. 1/batch_size
+        # of the validation data.
+        self.all_yhat.append(y_hat)
+        self.all_target.append(y)
         self.log('test_loss', loss, sync_dist=True)
         return {'test_loss': loss}
 

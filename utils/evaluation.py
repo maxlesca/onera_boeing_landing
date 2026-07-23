@@ -62,9 +62,12 @@ def evaluate_arrays(config_model: dict,
     trainer.test(model, dataloaders=loader)
     duration = time.time() - start
     print(f"Inference wall time: {duration:.2f}s")
+    # cat, not stack: the batches are concatenated back into one (samples, time,
+    # channels) array, so `metrics` really averages per sample and the per-channel
+    # metrics see every portion of the split.
     return (
-        torch.stack(model.all_yhat).cpu().numpy(),
-        torch.stack(model.all_target).cpu().numpy(),
+        torch.cat(model.all_yhat).cpu().numpy(),
+        torch.cat(model.all_target).cpu().numpy(),
         np.asarray(model.all_runtime),
     )
 
