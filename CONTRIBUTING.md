@@ -12,7 +12,7 @@
 | `boeing_landing/evaluate.py`, `report.py` | post-training analysis of any run dir |
 | `boeing_landing/experiments/` | sweeps built on top of `train` (channel orders, seeds) |
 | `boeing_landing/config.py` | pipeline config loading (`extends` inheritance) — boeing-only, hence not in `utils/` |
-| `utils/` | shared library — ONLY code that both the boeing and the quadrotor sides actually use |
+| `utils/` | shared library — code carrying **no boeing-specific knowledge** (model factory, Lightning wrapper, schedules). `quadrotor_baseline/` is frozen, so "both sides import it" cannot be the test for new code; the test is whether the module would need rewriting for another aircraft. |
 | `quadrotor_baseline/` | reference implementation; do not modify |
 | `Yolo_models_LARD_V2/` | third-party submodule; do not modify |
 
@@ -35,7 +35,10 @@ mirrors the utils/ one, one level down:
 - used by ONE pipeline  -> `pipelines/<name>/*.py`
 - used by ≥ 2 pipelines -> the engine (`data/`, `train.py`, …); promote it
   the day a second pipeline needs it — never copy it
-- used by boeing AND quadrotor -> `utils/`
+- knows nothing about the boeing data -> `utils/` (`utils/scheduler.py` is the
+  example: it wraps `utils/lightning.py`, so it belongs beside it; `config.py`
+  is the counter-example — it knows the pipeline layout, so it stays in
+  `boeing_landing/`)
 
 ## Adding a training variant of an existing pipeline
 

@@ -6,19 +6,16 @@
 # out-of-distribution work.
 #
 # Only the lr changes; every other knob comes from base.yaml, so the comparison
-# against the base run is clean.
+# against the base run is clean -- INCLUDING the build, so this reuses the base
+# npz instead of writing a byte-identical copy (lr is a train-time knob, it does
+# not touch the data). Same convention as the run-7 group, which shares one npz.
+# The run still lands in its own folder: runs/ils_aligned_cfc/run8_lowlr_<order>/,
+# tagged by this file's stem.
 #
-#   make dataset CONFIG=ils_aligned_cfc/run8_lowlr
+#   make dataset CONFIG=ils_aligned_cfc       # if the base npz is not built yet
 #   make train   CONFIG=ils_aligned_cfc/run8_lowlr
 
 extends: base.yaml
 
 training:
   lr: 0.0001
-
-build:
-  out_dir: datasets/ils_aligned_cfc_run8_lowlr   # its own npz (baseline run-8 split)
-
-dataset:
-  train_npz: datasets/ils_aligned_cfc_run8_lowlr/landing_train.npz
-  val_npz: datasets/ils_aligned_cfc_run8_lowlr/landing_val.npz
