@@ -13,6 +13,10 @@ training runs only -- the held-out run never leaks into the bounds. Same seed on
 every fold (and across arms) so a difference is attributable to the held-out run
 (or the recipe), not the init lottery.
 
+K is the population the config declares (build.train_runs + build.val_runs, e.g.
+30 + 3 for ned_wind_cfc phase 1), so a fold trains on the same number of runs as
+the pipeline it scores -- not on every run of the csv.
+
 `val_loss` is comparable across folds of one arm and across arms that share the
 normalisation method (same label scale); it is NOT comparable min-max vs z-score.
 The mean **R2** (scale-invariant, per-command, averaged) is comparable across all
@@ -88,9 +92,22 @@ def _fold_r2(config: dict, ckpt: Path) -> float:
     return mean_r2(regression_metrics(yhat, target, _labels(config)))
 
 
+def _fold_train_runs(config: dict, held_out: int) -> set[int] | None:
+    """The runs one fold trains on: the population the config declares
+    (build.train_runs + build.val_runs) minus the held-out one, or None when it
+    declares none -- the fold then takes every run of the csv, as before."""
+    b = config.get("build", {})
+    declared = {int(r) for r in b.get("train_runs") or []}
+    if not declared:
+        return None
+    return (declared | {int(r) for r in b.get("val_runs") or []}) - {held_out}
+
+
 def _build_fold(source: Path, run: int, out_dir: Path, config: dict,
                 physical_bounds, norm_method: str, reuse: bool) -> None:
-    """Rebuild the npz with `run` held out, bounds fit on the other runs only."""
+    """Rebuild the npz with `run` held out, bounds fit on the other runs only.
+    Every build knob comes from the config, so a fold is the pipeline's own recipe
+    with a different split -- never a partly defaulted one."""
     if reuse and (out_dir / "landing_train.npz").exists() and (out_dir / "landing_val.npz").exists():
         print(f"  reuse existing {out_dir}")
         return
@@ -98,7 +115,9 @@ def _build_fold(source: Path, run: int, out_dir: Path, config: dict,
     build_dataset.build(source, {run}, out_dir,
                         extra_columns=b.get("extra_columns") or [],
                         input_set=b.get("input_set", "gps"),
-                        physical_bounds=physical_bounds, norm_method=norm_method)
+                        physical_bounds=physical_bounds, norm_method=norm_method,
+                        label_set=b.get("label_set", "commands"),
+                        train_runs=_fold_train_runs(config, run))
 
 
 def sweep(config_path: Path, tag: str, physical_bounds, norm_method: str,
