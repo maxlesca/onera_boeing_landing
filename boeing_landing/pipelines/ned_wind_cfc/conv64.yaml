@@ -1,0 +1,10 @@
+# Encoder-study variant: the same Conv1D->CfC as base.yaml but with the conv
+# front end dieted from the standard 256 channels down to 64. At 256 the conv is
+# ~77% of the network (215k of 279k parameters); at 64 it is far lighter, so this
+# arm asks whether most of that front end is dead weight on a 20-channel state.
+# Same build: section as base.yaml, so it reuses the SAME npz -- no rebuild.
+
+extends: base.yaml
+
+conv_block:
+  output_dim: 64           # base is 256; everything else (sequencing) inherited

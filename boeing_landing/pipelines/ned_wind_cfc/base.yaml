@@ -1,4 +1,4 @@
-# ned_wind_cfc: the 85-run / 8-airport delivery, state -> CfC, no encoder.
+# ned_wind_cfc: the 85-run / 8-airport delivery, state -> Conv1D -> CfC.
 #
 # Inputs (20 + dt): local NED position AS DELIVERED, attitude, body rates, body
 # velocity, wind (linear + rotational gusts), weight-on-wheels. No GPS, no NED
@@ -8,7 +8,9 @@
 # the role of his M_ext external disturbance (see DOC 8.19.5).
 #
 #   make dataset CONFIG=ned_wind_cfc   # the two raw csv -> csv -> npz, in one go
-#   make train   CONFIG=ned_wind_cfc   # arm 0; then /mlp_encoder and /conv
+#   make train   CONFIG=ned_wind_cfc   # the default Conv1D->CfC recipe
+# The encoder study runs base against its two variants: bare.yaml (no encoder)
+# and conv64.yaml (a lighter 64-channel conv front end).
 # Paths are relative to the repo root (run from onera_boeing_landing/).
 
 training:
@@ -93,20 +95,22 @@ dataset:
   noise_std: 0.01          # sigma, only read when with_noise is true
 
 # --- the encoder in front of the CfC ------------------------------------------
-# Default: none. The CfC already has its own backbone (128 units), the state is
-# 20 heterogeneous physical channels with no spatial structure to convolve over,
-# and on Tudor's own quadrotor the conv block made the CfC 2.3x WORSE
-# (val_loss 0.000326 vs 0.000142). Arms 1 and 2 are mlp_encoder.yaml and conv.yaml.
+# Default: the Conv1D front end, same as every other pipeline (gps/ils/magnetic).
+# Kept as the default for consistency, NOT because it is proven best here: the
+# state is 20 heterogeneous physical channels with no spatial structure to
+# convolve over, and on Tudor's own quadrotor the conv made the CfC 2.3x WORSE
+# (val_loss 0.000326 vs 0.000142). That is exactly what the two variants test --
+# bare.yaml (no encoder) and conv64.yaml (a lighter conv) -- against this base.
 mlp_block:
   value: false
   no_layers: [64, 64]
 conv_block:
-  value: false
-  output_dim: 64
+  value: true
+  output_dim: 256          # the standard width; conv64.yaml overrides it to 64
 
-# The conv path needs sequencing; without it the CfC reads the portion directly.
+# The conv path needs sequencing; the bare variant turns both off together.
 sequencing:
-  value: false
+  value: true
   seq_len: 1
 
 dataloader:

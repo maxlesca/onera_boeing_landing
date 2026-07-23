@@ -10,7 +10,7 @@ NED at the landing threshold**, so no geodesy step is needed.
 
 ```bash
 make dataset CONFIG=ned_wind_cfc      # the two raw csv -> ned_wind.csv -> npz
-make train   CONFIG=ned_wind_cfc      # arm 0
+make train   CONFIG=ned_wind_cfc      # the default Conv1D -> CfC recipe
 ```
 
 `make dataset` runs the whole chain: it sees the `prepare:` block in the config,
@@ -81,30 +81,34 @@ test: 28.5 % of the validation frames fall outside [0,1] on `wind_velocity_y` an
 The remaining 52 runs are unused on purpose — phase 1 buys iteration speed,
 phase 2 (repeated random holdout over several seeds) uses everything.
 
-## The three arms — all of them CfC
+## The four arms — all of them CfC
 
 Only the block **in front of** the CfC changes; `model.type` stays `cfc`
-everywhere. All three read the **same npz**, so the dataset is built once.
+everywhere. All four read the **same npz**, so the dataset is built once.
 
 ```bash
-make train CONFIG=ned_wind_cfc              # arm 0: nothing, state -> CfC
-make train CONFIG=ned_wind_cfc/mlp_encoder  # arm 1: MLP [64,64] -> CfC
-make train CONFIG=ned_wind_cfc/conv         # arm 2: Tudor's ConvBlock -> CfC
+make train CONFIG=ned_wind_cfc              # default: Conv1D(256) -> CfC (as every pipeline)
+make train CONFIG=ned_wind_cfc/bare         # no encoder: state -> CfC
+make train CONFIG=ned_wind_cfc/conv64       # lighter Conv1D(64) -> CfC
+make train CONFIG=ned_wind_cfc/mlp_encoder  # MLP [64,64] -> CfC
 make plots RUNS="runs/ned_wind_cfc/..." BARS=1 SAVE=1
 ```
 
 | arm | encoder | total params | of which encoder |
 |---|---|---|---|
-| **0 (default)** | none | **44 424** | — |
-| 1 | MLP [64, 64] | 55 688 | 5 632 |
-| 2 | ConvBlock, `output_dim: 64` | 214 984 | 164 928 (77 %) |
+| **default** | ConvBlock, `output_dim: 256` | **363 016** | 318 592 (88 %) |
+| bare | none | 44 424 | — |
+| conv64 | ConvBlock, `output_dim: 64` | 214 984 | 164 928 (77 %) |
+| mlp_encoder | MLP [64, 64] | 55 688 | 5 632 |
 
-Why no encoder by default: the CfC already has its own backbone (128 units); the
-convolution slides its kernel over the **feature axis** (`in_channels = seq_len`),
-which imposes weight sharing between unrelated physical quantities; and on
-Tudor's own quadrotor the conv block made the CfC **2.3× worse**
-(`val_loss` 0.000326 against 0.000142) — the worst of all his recurrent models.
-See DOC §8.19.6.
+The Conv1D is the default only for **consistency** with the other pipelines
+(gps/ils/magnetic), NOT because it is proven best here — and the `bare` and
+`conv64` arms exist precisely to check whether it earns its parameters. Reasons
+to doubt it: the CfC already has its own backbone (128 units); the convolution
+slides its kernel over the **feature axis** (`in_channels = seq_len`), which
+imposes weight sharing between unrelated physical quantities; and on Tudor's own
+quadrotor the conv block made the CfC **2.3× worse** (`val_loss` 0.000326 against
+0.000142) — the worst of all his recurrent models. See DOC §8.19.6.
 
 ## Learning-rate schedule (optional)
 
@@ -125,9 +129,9 @@ same lr curve and any difference between them comes from the architecture.
 | file | role |
 |---|---|
 | `prepare.py` | delivery → canonical csv: renames the columns the repo knows under another name, drops the unused ones, checks the runways against the airport table. Never recomputes a value. |
-| `base.yaml` | arm 0 + the phase-1 split + every knob |
-| `mlp_encoder.yaml`, `conv.yaml` | arms 1 and 2, `extends: base.yaml` |
-| `cosine.yaml` | same as arm 0 with the cosine schedule |
+| `base.yaml` | the default Conv1D(256) arm + the phase-1 split + every knob |
+| `bare.yaml`, `conv64.yaml`, `mlp_encoder.yaml` | the three other encoder arms, `extends: base.yaml` |
+| `cosine.yaml` | same as the default arm with the cosine schedule |
 
 The airport table (`airports_info_complete.csv`) contributes **no feature**: the
 position is used exactly as delivered, with no frame conversion. It is read to

@@ -1,7 +1,7 @@
-# Arm 1 of the encoder study. Still a CfC controller (model.type stays cfc from
+# Encoder-study variant. Still a CfC controller (model.type stays cfc from
 # base.yaml) -- what changes is ONLY the block in front of it: a small MLP state
-# encoder instead of nothing. This is Tudor's MLPCfC (MLP -> CfC), not his
-# feedforward mlp baseline.
+# encoder in place of the base's Conv1D. This is Tudor's MLPCfC (MLP -> CfC),
+# not his feedforward mlp baseline.
 # 55,688 parameters, of which 5,632 of encoder, against 44,424 for the bare CfC.
 # The standard encoder for a low-dimensional state: unlike a convolution it
 # assumes nothing about the ORDER of the channels, which is the right prior for a
@@ -13,3 +13,9 @@ extends: base.yaml
 mlp_block:
   value: true
   no_layers: [64, 64]
+# turn off the base's Conv1D front end -- the MLP replaces it, they are not stacked
+conv_block:
+  value: false
+# the MLP reads one frame at a time, so no window axis (unlike the conv path)
+sequencing:
+  value: false

@@ -1,0 +1,15 @@
+# Encoder-study variant: the bare CfC, no encoder at all -- the CfC reads the
+# 20-channel state directly. The state is heterogeneous physical channels with
+# no spatial structure to convolve over, so this arm tests whether the base's
+# Conv1D front end earns its 214k extra parameters here (on Tudor's quadrotor a
+# conv made the CfC 2.3x worse -- see base.yaml). 44,424 parameters.
+# Same build: section as base.yaml, so it reuses the SAME npz -- no rebuild.
+
+extends: base.yaml
+
+conv_block:
+  value: false
+# No encoder means no sequencing: the CfC takes the portion as (batch, time,
+# features) directly, without the window axis the conv path needs.
+sequencing:
+  value: false
