@@ -36,6 +36,20 @@ class ConvBlock(nn.Module):
     """Compact temporal feature extractor used before the recurrent core."""
 
     def __init__(self, no_input, width="base", base_channels=256):
+        """Build the four strided convolutions.
+
+        Args:
+            no_input: channels the block reads -- for the landing pipeline this
+                is the SEQUENCE length, the convolution sliding over the
+                feature axis, which is why the channel order is a real
+                hyperparameter.
+            width: named multiplier on every layer (eighth to double).
+            base_channels: width of the last layer before scaling.
+        Returns:
+            Nothing.
+        Raises:
+            ValueError: unknown width name.
+        """
         super().__init__()
 
         mult_map = {
@@ -64,6 +78,14 @@ class ConvBlock(nn.Module):
         self.bn4 = nn.BatchNorm1d(c4)
 
     def forward(self, x):
+        """Encode one frame's features.
+
+        Args:
+            x: (batch, no_input, features).
+        Returns:
+            (batch, out_channels): the four convolutions, then a mean over the
+            remaining feature axis.
+        """
         x = F.relu(self.conv1(x))
         x = F.relu(self.bn2(self.conv2(x)))
         x = F.relu(self.conv3(x))
@@ -75,11 +97,31 @@ class ConvCfC(nn.Module):
     """Apply convolutional preprocessing before a liquid recurrent module."""
 
     def __init__(self, no_input, rnn_module, width="base", base_channels=256):
+        """Assemble encoder and recurrent core.
+
+        Args:
+            no_input: what ConvBlock reads (the sequence length).
+            rnn_module: the recurrent core to run on the encoded frames.
+            width: named width multiplier of the encoder.
+            base_channels: encoder output width before scaling.
+        Returns:
+            Nothing.
+        """
         super().__init__()
         self.conv_block = ConvBlock(no_input, width=width, base_channels=base_channels)
         self.rnn = rnn_module
 
     def forward(self, x, hx=None, timespans=None):
+        """Encode every frame, then run the recurrent core over the sequence.
+
+        Args:
+            x: (batch, seq_len, ...) as the sequencing produced it.
+            hx: recurrent hidden state, None to start fresh.
+            timespans: per-frame dt; expanded here to the core's state size,
+                which is what ncps expects (see TimespanCfC).
+        Returns:
+            Whatever the core returns, usually (predictions, hidden state).
+        """
         batch_size = x.size(0)
         seq_len = x.size(1)
         x = x.view(batch_size * seq_len, *x.shape[2:])
@@ -109,16 +151,32 @@ class TimespanCfC(nn.Module):
     """
 
     def __init__(self, rnn_module):
+        """Wrap a recurrent module and find its state size.
+
+        Args:
+            rnn_module: the module to wrap. MLPCfC holds the recurrent core one
+                level down, so the state size is looked up through the chain
+                rather than on the wrapped module itself.
+        Returns:
+            Nothing.
+        """
         super().__init__()
         self.rnn = rnn_module
-        # MLPCfC holds the recurrent core one level down, so the state size is
-        # looked up through the chain rather than on the wrapped module itself.
         inner = rnn_module
         while not hasattr(inner, "state_size") and hasattr(inner, "rnn"):
             inner = inner.rnn
         self.state_size = getattr(inner, "state_size", None)
 
     def forward(self, x, hx=None, timespans=None):
+        """Expand the timespans, then delegate.
+
+        Args:
+            x: the inputs.
+            hx: recurrent hidden state.
+            timespans: per-frame dt, broadcast here to the core's state size.
+        Returns:
+            Whatever the wrapped module returns.
+        """
         if timespans is not None and self.state_size:
             timespans = timespans.reshape(x.size(0), x.size(1), -1)
             if timespans.shape[-1] == 1:
@@ -141,6 +199,21 @@ class MLPBlock(nn.Module):
         batch_norm: bool = True,
         bias: bool = True,
     ):
+        """Build the Linear stack.
+
+        Args:
+            input_size: input width.
+            hidden_sizes: width of each layer, the last one being the output.
+            activation: activation class inserted between layers.
+            out_activation: optional activation after the last layer.
+            dropout: dropout probability between layers, 0 to disable.
+            batch_norm: insert a LayerNorm between layers.
+            bias: give the Linear layers a bias.
+        Returns:
+            Nothing.
+        Raises:
+            ValueError: no hidden size was given.
+        """
         super().__init__()
 
         sizes = [input_size] + list(hidden_sizes)
@@ -165,6 +238,16 @@ class MLPBlock(nn.Module):
         self.net = nn.Sequential(*layers)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
+        """Apply the MLP frame by frame, whatever the input rank.
+
+        Args:
+            x: (B, F), (B, T, F), or (B, T, S, F) -- the history axis of the
+                rank-4 layout is flattened into the features.
+        Returns:
+            (B, out) or (B, T, out).
+        Raises:
+            ValueError: any other rank.
+        """
         if x.ndim == 2:
             return self.net(x)
         if x.ndim == 3:
@@ -183,11 +266,30 @@ class MLPCfC(nn.Module):
     """Apply MLP preprocessing before the liquid recurrent module."""
 
     def __init__(self, no_input, layer_sizes, rnn_module):
+        """Assemble encoder and recurrent core.
+
+        Args:
+            no_input: input channels per frame.
+            layer_sizes: the encoder's layer widths.
+            rnn_module: the recurrent core.
+        Returns:
+            Nothing.
+        """
         super().__init__()
         self.mlp_block = MLPBlock(no_input, layer_sizes)
         self.rnn = rnn_module
 
     def forward(self, x, hx=None, timespans=None):
+        """Encode, then run the recurrent core.
+
+        Args:
+            x: the inputs.
+            hx: recurrent hidden state.
+            timespans: per-frame dt, forwarded untouched -- model_builder wraps
+                this module in TimespanCfC when the dataset provides one.
+        Returns:
+            Whatever the core returns.
+        """
         x = self.mlp_block(x)
         return self.rnn(x, hx, timespans)
 
@@ -196,6 +298,17 @@ class MultiLayerWiring(kncp.wirings.FullyConnected):
     """All-to-all multi-layer wiring helper for NCP-style experiments."""
 
     def __init__(self, neurons_per_layer, output_dim=None):
+        """Lay the neurons out in layers.
+
+        Args:
+            neurons_per_layer: size of each layer, in order.
+            output_dim: how many neurons of the last layer are motor neurons;
+                defaults to the whole last layer.
+        Returns:
+            Nothing.
+        Raises:
+            ValueError: output_dim exceeds the last layer.
+        """
         self._neurons_per_layer = neurons_per_layer
         self._num_layers = len(neurons_per_layer)
         self._layer_boundaries = np.cumsum(neurons_per_layer)
@@ -218,14 +331,38 @@ class MultiLayerWiring(kncp.wirings.FullyConnected):
 
     @property
     def num_layers(self):
+        """How many layers the wiring holds.
+
+        Returns:
+            That count.
+        """
         return self._num_layers
 
     def get_neurons_of_layer(self, layer):
+        """The neuron indices of one layer.
+
+        Args:
+            layer: its index.
+        Returns:
+            The list of neuron indices.
+        Raises:
+            ValueError: index out of range.
+        """
         if layer < 0 or layer >= self._num_layers:
             raise ValueError("Layer index out of range")
         return self._layer_neurons[layer]
 
     def build(self, input_dim):
+        """Wire the adjacency matrices, once the input width is known.
+
+        Args:
+            input_dim: the sensory input width; every input reaches every
+                neuron.
+        Returns:
+            Nothing; fills the adjacency matrices -- each layer fully connected
+            to the next and to itself -- and, when the output is narrower than
+            the last layer, disconnects the neurons that are not motor ones.
+        """
         super().build(input_dim)
         self._input_dim = input_dim
         self.sensory_adjacency_matrix = np.ones((self._input_dim, self.units), dtype=np.float32)
@@ -255,6 +392,11 @@ class MultiLayerWiring(kncp.wirings.FullyConnected):
         self._num_synapses = int(np.sum(np.abs(self.adjacency_matrix))) + int(np.sum(np.abs(self.sensory_adjacency_matrix)))
 
     def get_config(self):
+        """The wiring's serialisable configuration.
+
+        Returns:
+            What the ncps base class produces.
+        """
         return super().get_config()
 
 
@@ -272,6 +414,20 @@ class SNN(nn.Module):
         learn_beta=False,
         learn_threshold=False,
     ):
+        """Build the three spiking layers and the readout.
+
+        Args:
+            input_dim: input channels per frame.
+            hidden_dim: width of each spiking layer.
+            output_dim: command count.
+            beta: membrane decay of the leaky neurons.
+            reset_type: snntorch reset mechanism ('subtract' or 'zero').
+            reset_delay: snntorch reset timing flag.
+            learn_beta: unused here, kept for call compatibility.
+            learn_threshold: unused here, same reason.
+        Returns:
+            Nothing.
+        """
         super().__init__()
 
         self.policy_fc1 = nn.Linear(input_dim, hidden_dim)
@@ -283,6 +439,19 @@ class SNN(nn.Module):
         self.an = nn.Linear(hidden_dim, output_dim)
 
     def forward(self, x, hx=None, timespans=None, num_steps=10):
+        """Run the spiking stack, frame by frame.
+
+        Args:
+            x: (batch, seq_len, features).
+            hx: unused, present for API consistency.
+            timespans: unused, same reason.
+            num_steps: spiking steps simulated per input frame; the output is
+                their mean spike rate, which is what makes the response
+                differentiable.
+        Returns:
+            (predictions (batch, seq_len, output_dim), the spike rates that
+            produced them).
+        """
         latent_pi_list = []
 
         for timestep in range(x.size(1)):

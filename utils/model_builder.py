@@ -31,19 +31,42 @@ WIDTH_VARIANTS = {
 
 
 def scaled_int(value: int | None, scale: float, minimum: int = 1) -> int | None:
-    """Scale an integer width/depth parameter while respecting a floor."""
+    """Scale one width/depth parameter.
+
+    Args:
+        value: the base size, None passing through untouched.
+        scale: the multiplier (see resolve_scale_factor).
+        minimum: floor, so a small layer never scales down to nothing.
+    Returns:
+        The scaled size, rounded to an int.
+    """
     if value is None:
         return None
     return max(minimum, int(round(float(value) * scale)))
 
 
 def scaled_layers(values: Sequence[int], scale: float, minimum: int = 1) -> list[int]:
-    """Scale a full list of hidden-layer sizes with the same multiplier."""
+    """Scale a whole list of hidden-layer sizes with one multiplier.
+
+    Args:
+        values: the base layer sizes.
+        scale: the multiplier.
+        minimum: per-layer floor.
+    Returns:
+        The scaled sizes, same length.
+    """
     return [max(minimum, int(round(float(value) * scale))) for value in values]
 
 
 def resolve_scale_factor(config: dict) -> float:
-    """Return the global network scaling factor encoded in the config."""
+    """The global width multiplier a config asks for.
+
+    Args:
+        config: the resolved config -- `model.scale_factor` wins when present,
+            otherwise the named `model_variant.width` is looked up.
+    Returns:
+        That factor, 1.0 for an unknown variant name.
+    """
     model_cfg = config.get("model", {})
     if "scale_factor" in model_cfg:
         return float(model_cfg["scale_factor"])
@@ -54,15 +77,29 @@ def resolve_scale_factor(config: dict) -> float:
 
 
 def supports_recurrent_state(config: dict) -> bool:
+    """Whether the configured model carries a hidden state.
+
+    Args:
+        config: the resolved config.
+    Returns:
+        False for the feedforward baselines (mlp/ff_mlp/nn), True for every
+        recurrent family -- callers use it to decide whether to thread a
+        hidden state through a rollout.
+    """
     return str(config.get("model", {}).get("type", "ltc")).lower() not in {"mlp", "ff_mlp", "nn"}
 
 
 def build_ncp_wiring(model_cfg: dict, output_size: int, scale_factor: float = 1.0):
-    """
-    Construct an NCP wiring from config.
+    """Construct an NCP wiring from config.
 
-    The default values match the older hard-coded experiment script so the
-    refactored pipeline can reproduce those runs without custom edits.
+    Args:
+        model_cfg: the config's model section, read for its `ncp` block; the
+            defaults match the older hard-coded experiment script, so the
+            refactored pipeline reproduces those runs without custom edits.
+        output_size: the command count, which fixes the motor neurons.
+        scale_factor: the global width multiplier.
+    Returns:
+        The ncps NCP wiring object.
     """
     ncp_cfg = model_cfg.get("ncp", {})
     inter_neurons = scaled_int(ncp_cfg.get("inter_neurons", 32), scale_factor, minimum=1)
@@ -88,6 +125,22 @@ def build_ncp_wiring(model_cfg: dict, output_size: int, scale_factor: float = 1.
 
 
 def build_recurrent_module(model_cfg: dict, input_size: int, output_size: int, scale_factor: float = 1.0) -> torch.nn.Module:
+    """Build the recurrent core alone, without any encoder in front of it.
+
+    Args:
+        model_cfg: the config's model section; `type` selects the family (cfc,
+            ltc, ncp, simplernn, ctrnn, gru, lstm, or a feedforward mlp) and
+            `no_neurons_layer` its width.
+        input_size: what actually reaches the core -- the encoder's output
+            width when a conv/mlp block precedes it, not the dataset's channel
+            count.
+        output_size: the command count.
+        scale_factor: the global width multiplier.
+    Returns:
+        The module.
+    Raises:
+        ValueError: unknown model type.
+    """
     model_type = str(model_cfg.get("type", "ltc")).lower()
     hidden_units = scaled_int(model_cfg.get("no_neurons_layer", 64), scale_factor, minimum=1)
 
@@ -159,17 +212,27 @@ def build_recurrent_module(model_cfg: dict, input_size: int, output_size: int, s
 
 
 def build_controller_network(config: dict, input_dim: int, output_dim: int) -> torch.nn.Module:
-    """
-    Construct the controller architecture encoded by `config`.
+    """The single factory every entrypoint calls, so architecture selection is
+    defined exactly once.
 
-    Supported knobs:
-    - `model.type`: cfc, ltc, ncp, ctrnn, simplernn, gru, lstm, mlp
-    - `model.no_neurons_layer`: recurrent hidden size
-    - `model.cfc_mode`: default, pure, no_gate
-    - `model.ncp.*`: NCP wiring sizes and fan-in/fan-out
-    - `model.backbone_units`, `model.backbone_layers`, `model.backbone_dropout`
-    - `model.scale_factor`: global width multiplier for the whole network
-    - `conv_block.output_dim` and `mlp_block.no_layers`
+    Supported knobs: `model.type` (cfc, ltc, ncp, ctrnn, simplernn, gru, lstm,
+    mlp), `model.no_neurons_layer`, `model.cfc_mode`, `model.ncp.*`,
+    `model.backbone_*`, `model.scale_factor`, and the optional encoder in front
+    of the core -- `conv_block.output_dim` or `mlp_block.no_layers`.
+
+    Args:
+        config: the resolved config.
+        input_dim: the dataset's input channels, dt excluded.
+        output_dim: the command count.
+    Returns:
+        The assembled network: encoder + recurrent core, wrapped in TimespanCfC
+        when the dataset feeds a dt channel (ncps needs the timespans expanded
+        to its state size; ConvCfC does that itself). The wrapper is gated on
+        that flag, so a network built without dt keeps its exact state dict.
+    Raises:
+        ValueError: an unsupported combination -- a feedforward baseline asked
+            to sit behind an encoder, an empty mlp_block, or a conv_block
+            without sequencing.
     """
     scale_factor = resolve_scale_factor(config)
     mlp_cfg = config.get("mlp_block", {})

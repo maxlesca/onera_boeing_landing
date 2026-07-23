@@ -44,12 +44,18 @@ ALIASES = {
 
 def resolve_ablation_features(requested_items: list[str] | None,
                               feature_sets: dict | None = None) -> list[str]:
-    """
-    Resolve a mixed list of group names and explicit feature names.
+    """Resolve a mixed list of group names and explicit feature names.
 
-    Example:
-    - `["velocity"]` -> `["vx", "vy", "vz"]`
-    - `["velocity", "phi"]` -> `["vx", "vy", "vz", "phi"]`
+    Example: `["velocity"]` -> `["vx", "vy", "vz"]`, and
+    `["velocity", "phi"]` -> `["vx", "vy", "vz", "phi"]`.
+
+    Args:
+        requested_items: group names, channel names, or both.
+        feature_sets: the group table to expand against (the quadrotor's
+            default groups when omitted).
+    Returns:
+        The flat channel list, deduplicated case-insensitively and in the order
+        requested; empty for an empty request.
     """
     if not requested_items:
         return []
@@ -77,12 +83,15 @@ def resolve_ablation_features(requested_items: list[str] | None,
 
 def drop_features_from_labels(input_labels: list[str],
                               requested_features: list[str]) -> tuple[list[str], list[str]]:
-    """
-    Remove requested features from a config label list while preserving order.
+    """Remove requested features from a config label list, preserving order.
 
-    The returned tuple is:
-    - filtered label list to store back into the config
-    - list of actually removed expanded features for metadata/naming
+    Args:
+        input_labels: the config's input labels.
+        requested_features: the channels to drop; `omega` and any of its four
+            expanded names all drop the whole block.
+    Returns:
+        (filtered labels to store back into the config, the expanded names
+        actually removed -- the second is what names the resulting run).
     """
     if not requested_features:
         return list(input_labels), []
@@ -115,9 +124,19 @@ def drop_features_from_labels(input_labels: list[str],
 
 
 def resolve_feature_indices(input_labels: list[str], features: list[str], expand: bool = True) -> list[int]:
-    # `expand=False` for datasets whose labels are already one-channel-per-name
-    # (e.g. the landing pipeline, where "u" is a scalar body velocity, not the
-    # quadrotor's 4-motor command vector).
+    """Turn channel names into positions in the model's input tensor.
+
+    Args:
+        input_labels: the run's input channels, in model order.
+        features: the channels to locate; names the run does not have are
+            skipped rather than raising, so one ablation table can serve
+            several input sets.
+        expand: False for datasets whose labels are already one channel per
+            name -- the landing pipeline, where "u" is a scalar body velocity
+            and not the quadrotor's 4-motor command vector.
+    Returns:
+        Their indices, sorted and deduplicated.
+    """
     expanded = expand_feature_labels(input_labels) if expand else list(input_labels)
     normalized_lookup = {
         label.lower(): idx
@@ -145,6 +164,18 @@ def apply_feature_ablation(data: np.ndarray,
                            features: list[str],
                            fill_value: float = 0.0,
                            expand: bool = True) -> np.ndarray:
+    """Blank out a group of channels to measure what the model loses with it.
+
+    Args:
+        data: the evaluation inputs, channels on axis 1.
+        input_labels: the run's input channels, in model order.
+        features: the channels to mask.
+        fill_value: what replaces them.
+        expand: see resolve_feature_indices.
+    Returns:
+        A masked copy -- always a copy, so repeated ablations all start from
+        the same baseline. Unchanged when no channel matched.
+    """
     indices = resolve_feature_indices(input_labels, features, expand=expand)
     if not indices:
         return np.array(data, copy=True)
@@ -156,11 +187,21 @@ def apply_feature_ablation(data: np.ndarray,
 
 
 def iter_ablation_specs(ablation_cfg: dict | None, input_labels: list[str], expand: bool = True):
+    """The ablations a config asks for that this run can actually perform.
+
+    Args:
+        ablation_cfg: the evaluation's ablation block; disabled or absent
+            yields nothing.
+        input_labels: the run's input channels, in model order.
+        expand: see resolve_feature_indices.
+    Returns:
+        [(group name, its channels), ...], groups matching no channel of this
+        run being dropped -- so the caller can iterate the list directly
+        without filtering again.
+    """
     if not ablation_cfg or not ablation_cfg.get("enabled", False):
         return []
 
-    # Invalid or empty ablations are silently skipped so the caller can iterate
-    # the resulting list directly without extra filtering.
     feature_sets = ablation_cfg.get("feature_sets") or DEFAULT_FEATURE_GROUPS
     specs = []
     for name, features in feature_sets.items():

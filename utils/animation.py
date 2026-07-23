@@ -32,10 +32,41 @@ draw_forces=False
 record=False
 
 def nothing(x):
+    """No-op callback for the OpenCV trackbar, which requires one.
+
+    Args:
+        x: the new trackbar value, ignored -- the loop reads the position
+            directly when it needs it.
+    Returns:
+        Nothing.
+    """
     pass
 
 
 def animate(t, x, y, z, phi, theta, psi, u, autopilot_mode=[], target=[], waypoints=[], file='output.mp4', multiple_trajectories=False, simultaneous=False, colors=[], names=[], alpha=0, step=1, **kwargs):
+    """Replay one or several quadrotor trajectories in a 3D wireframe window.
+
+    Args:
+        t: the timestamps (a list of arrays when several trajectories).
+        x, y, z: the positions, same layout as t.
+        phi, theta, psi: the attitudes, same layout.
+        u: the four motor commands per frame, same layout.
+        autopilot_mode: optional per-frame mode, displayed as text.
+        target: optional target position to draw.
+        waypoints: optional waypoints to draw.
+        file: output video path when recording.
+        multiple_trajectories: the arrays hold several trajectories.
+        simultaneous: draw them at the same time rather than one after the
+            other; the longest one drives the clock.
+        colors: one colour per trajectory.
+        names: one label per trajectory.
+        alpha: transparency of the trailing paths.
+        step: draw one frame out of `step`, to replay faster.
+        **kwargs: follow (camera tracks the drone), auto_play, draw_path,
+            draw_forces, record, close_on_end.
+    Returns:
+        Nothing; opens the window and, when recording, writes the video.
+    """
     follow = kwargs.get("follow", False)
     auto_play = kwargs.get("auto_play", False)
     draw_path = kwargs.get("draw_path", False)

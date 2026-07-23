@@ -5,8 +5,14 @@ dragging = False
 xi, yi = -1, -1
 
 
-# Calculates Rotation Matrix given euler angles.
 def rotation_matrix(theta):
+    """Rotation matrix from Euler angles.
+
+    Args:
+        theta: the (roll, pitch, yaw) triple in radians.
+    Returns:
+        The (3, 3) matrix, composed Rz @ Ry @ Rx.
+    """
     R_x = np.array([[1, 0, 0],
                     [0, np.cos(theta[0]), -np.sin(theta[0])],
                     [0, np.sin(theta[0]), np.cos(theta[0])]
@@ -24,8 +30,20 @@ def rotation_matrix(theta):
 
 
 class Camera:
+    """Orbit camera for the wireframe viewer: it turns around a centre point
+    and projects world points into the image with OpenCV."""
+
     def __init__(self, pos, theta, cameraMatrix, distCoeffs):
-        # pose
+        """Place the camera.
+
+        Args:
+            pos: its position in the world frame.
+            theta: its (roll, pitch, yaw) in radians.
+            cameraMatrix: the OpenCV intrinsic matrix.
+            distCoeffs: the OpenCV distortion coefficients.
+        Returns:
+            Nothing.
+        """
         self.pos = pos                          # wrt world frame
         self.theta = theta                      # Euler angles: roll pitch yaw
         self.rMat = rotation_matrix(theta)
@@ -38,21 +56,50 @@ class Camera:
         self.distCoeffs = distCoeffs
 
     def set_center(self, vector):
+        """Move the point the camera orbits -- following a drone means moving
+        this to its position every frame.
+
+        Args:
+            vector: the new centre in world coordinates.
+        Returns:
+            Nothing; the camera position is recomputed from it.
+        """
         self.center = vector
         self.pos = np.dot(self.rMat, self.r) + self.center
 
     def rotate(self, theta):
+        """Turn the camera around its centre.
+
+        Args:
+            theta: the (roll, pitch, yaw) increment in radians.
+        Returns:
+            Nothing; orientation and position are both updated.
+        """
         self.theta += theta
         self.rMat = rotation_matrix(self.theta)
         self.pos = np.dot(self.rMat, self.r) + self.center
-        
+
     def zoom(self, scl):
+        """Move the camera along its orbit radius.
+
+        Args:
+            scl: multiplier on the radius -- above 1 pulls back, below 1 moves in.
+        Returns:
+            Nothing.
+        """
         self.r *= scl
         self.pos = self.rMat @ self.r + self.center
 
-    # projects 3d points from world frame to 2d camera image
     def project(self, points):
-        # points in frame (in front of the camera) given by a boolean array
+        """Project world points onto the image.
+
+        Args:
+            points: (n, 3) world coordinates.
+        Returns:
+            (projected pixels, in_frame) -- the boolean flags which points sit
+            in front of the camera, the projection of the others being
+            meaningless.
+        """
         in_frame = np.dot(points - self.pos, self.rMat[:, 0]) > 0.01
 
         # x-axis is used as projection axis
@@ -65,6 +112,16 @@ class Camera:
         return projected_points, in_frame
 
     def mouse_control(self, event, x, y, flags, params):
+        """OpenCV mouse callback: dragging turns the camera.
+
+        Args:
+            event: the OpenCV event code.
+            x, y: cursor position in the window.
+            flags: OpenCV flags (unused).
+            params: OpenCV user data (unused).
+        Returns:
+            Nothing; a drag rotates the camera by the cursor travel.
+        """
         global xi, yi, dragging
         if event == cv2.EVENT_LBUTTONDOWN:
             dragging = True
@@ -87,13 +144,34 @@ class Camera:
 
 
 class Mesh:
+    """A wireframe: vertices plus the edges joining them."""
+
     def __init__(self, vertices, edges):
+        """Hold the geometry.
+
+        Args:
+            vertices: (n, 3) world coordinates.
+            edges: pairs of vertex indices to draw a segment between.
+        Returns:
+            Nothing.
+        """
         self.vertices = vertices
         self.edges = edges
         self.pos = np.array([0., 0., 0.])
         self.theta = np.array([0., 0., 0.])
 
     def draw(self, img, cam, color=(100, 100, 100), pt=1, arrow=False):
+        """Draw the wireframe on an image.
+
+        Args:
+            img: the image to draw on, modified in place.
+            cam: the camera doing the projection.
+            color: BGR colour.
+            pt: line thickness.
+            arrow: draw arrow heads instead of plain segments.
+        Returns:
+            Nothing; an edge with a vertex behind the camera is skipped.
+        """
         pvertices, in_frame = cam.project(self.vertices)
         for edge in self.edges:
             if in_frame[edge[0]] and in_frame[edge[1]]:
@@ -105,11 +183,26 @@ class Mesh:
                     cv2.line(img, pt1, pt2, color, pt)
 
     def translate(self, vector):
+        """Move the whole mesh.
+
+        Args:
+            vector: the world-frame displacement.
+        Returns:
+            Nothing; the vertices are moved in place.
+        """
         self.pos += vector
         for vertex in self.vertices:
             vertex += vector
 
     def rotate(self, theta):
+        """Set the mesh attitude, turning it about its own position.
+
+        Args:
+            theta: the target (roll, pitch, yaw) -- absolute, not an
+                increment: the current attitude is undone first.
+        Returns:
+            Nothing; the vertices are moved in place.
+        """
         M1 = np.transpose(rotation_matrix(self.theta))
         M2 = rotation_matrix(theta)
         R = np.dot(M2, M1)
@@ -120,11 +213,30 @@ class Mesh:
 
 
 class Force:
+    """An arrow drawn at a point of the mesh: one rotor's thrust."""
+
     def __init__(self, vertex):
+        """Attach the arrow.
+
+        Args:
+            vertex: where it starts, usually a rotor centre.
+        Returns:
+            Nothing; the force itself starts at zero (see set_thrust).
+        """
         self.vertex = vertex
         self.F = np.zeros(3)
 
     def draw(self, img, cam, color=(0, 0, 255), pt=1):
+        """Draw the arrow.
+
+        Args:
+            img: the image to draw on, modified in place.
+            cam: the camera doing the projection.
+            color: BGR colour.
+            pt: line thickness.
+        Returns:
+            Nothing.
+        """
         pt1, _ = cam.project(np.array([self.vertex]))
         pt2, _ = cam.project(np.array([self.vertex + self.F]))
         pt1 = tuple(pt1[0][0])
@@ -133,6 +245,14 @@ class Force:
 
 
 def create_grid(rows, cols, length):
+    """Build the ground grid the scene is read against.
+
+    Args:
+        rows, cols: number of cells in each direction.
+        length: cell size.
+    Returns:
+        A Mesh centred on the origin, lying in the z = 0 plane.
+    """
     rows, cols = rows+1, cols+1     # extra vertex in each direction
     vertices = np.zeros([rows * cols, 3])
     edges = []
@@ -151,6 +271,15 @@ def create_grid(rows, cols, length):
 
 
 def create_path(vertices, loop=False):
+    """Build a polyline through given points -- a trajectory, or the side of a
+    shape.
+
+    Args:
+        vertices: the points, in order.
+        loop: also join the last point back to the first.
+    Returns:
+        The Mesh.
+    """
     edges = [(i, i+1) for i in range(len(vertices)-1)]
     if loop:
         edges.append((0, len(vertices)-1))
@@ -158,6 +287,15 @@ def create_path(vertices, loop=False):
 
 
 def create_circle(r, px, py, pz, num=20):
+    """Build a horizontal circle, used for the rotor discs.
+
+    Args:
+        r: radius.
+        px, py, pz: its centre.
+        num: how many segments approximate it.
+    Returns:
+        The Mesh, closed into a loop.
+    """
     vertices = np.array([[
         px + r * np.cos(i * 2 * np.pi / num),
         py + r * np.sin(i * 2 * np.pi / num),
@@ -167,6 +305,15 @@ def create_circle(r, px, py, pz, num=20):
 
 
 def group(mesh_list):
+    """Merge several meshes into one, so they move and draw together.
+
+    Args:
+        mesh_list: the meshes to merge.
+    Returns:
+        A single Mesh; each part's edge indices are shifted by the number of
+        vertices already merged, which is what keeps the edges pointing at the
+        right vertices.
+    """
     vertices = np.concatenate([
         mesh.vertices for mesh in mesh_list
     ])
@@ -180,6 +327,15 @@ def group(mesh_list):
 
 
 def create_drone(r):
+    """Build the quadrotor model: four rotor discs, the arms, the body, and a
+    nose marker that shows which way it faces.
+
+    Args:
+        r: half the arm span, i.e. the overall size.
+    Returns:
+        (drone mesh, the four Force arrows) -- the last four vertices of the
+        mesh are the rotor centres, which is where the arrows attach.
+    """
     c1 = create_circle(2*r/3, r, -r, 0.)
     c2 = create_circle(2*r/3, -r, -r, 0.)
     c3 = create_circle(2*r/3, r, r, 0.)
@@ -217,6 +373,16 @@ def create_drone(r):
 
 
 def set_thrust(drone, forces, T):
+    """Point the four thrust arrows for the current attitude.
+
+    Args:
+        drone: the drone mesh, read for its attitude.
+        forces: its four Force arrows.
+        T: the four thrust magnitudes.
+    Returns:
+        Nothing; each arrow is set along the drone's own vertical axis, so they
+        tilt with it.
+    """
     T1, T2, T3, T4 = forces
     T1.F = - T[0] * rotation_matrix(drone.theta)[:, 2]
     T2.F = - T[1] * rotation_matrix(drone.theta)[:, 2]

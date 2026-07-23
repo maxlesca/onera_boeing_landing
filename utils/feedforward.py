@@ -17,7 +17,15 @@ import torch.nn as nn
 
 
 def _activation(name: str) -> type[nn.Module]:
-    """Map a config string to the corresponding PyTorch activation class."""
+    """Map a config string to a pytorch activation.
+
+    Args:
+        name: relu, tanh, gelu, mish or silu (case-insensitive).
+    Returns:
+        The activation class, not an instance.
+    Raises:
+        ValueError: unknown name.
+    """
     name = name.lower()
     if name == "relu":
         return nn.ReLU
@@ -47,6 +55,19 @@ class FeedForwardSequenceController(nn.Module):
                  hidden_layers: Sequence[int],
                  activation: str = "relu",
                  clamp_output: bool = False) -> None:
+        """Build the MLP.
+
+        Args:
+            input_dim: input channels per frame.
+            output_dim: command count.
+            hidden_layers: widths of the Linear+activation stack.
+            activation: which activation to repeat (see _activation).
+            clamp_output: append a sigmoid, for commands bounded to [0, 1].
+        Returns:
+            Nothing.
+        Raises:
+            ValueError: no hidden layer was given.
+        """
         super().__init__()
         if not hidden_layers:
             raise ValueError("hidden_layers must contain at least one entry.")
@@ -66,6 +87,20 @@ class FeedForwardSequenceController(nn.Module):
         self.network = nn.Sequential(*layers)
 
     def forward(self, x: torch.Tensor, hx=None, timespans=None):
+        """Apply the MLP to every frame independently.
+
+        Args:
+            x: inputs, rank 3 (batch, time, features) or rank 4 with an
+                explicit history axis -- of which only the latest frame is
+                consumed, this baseline having no memory.
+            hx: ignored, present so the module matches the recurrent contract.
+            timespans: ignored, same reason.
+        Returns:
+            (predictions, None) -- the same (output, hidden state) pair the
+            recurrent models return, so Lightning treats it as a drop-in.
+        Raises:
+            ValueError: input of any other rank.
+        """
         if x.ndim == 4:
             # Convolution-style datasets keep an explicit history axis; the
             # feedforward baseline only consumes the latest timestep.

@@ -36,7 +36,18 @@ class Lightning_Model(L.LightningModule):
     modes and logs losses and predictions for analysis.
     """
     def __init__(self, model, config):
-        """Requires specific pytorch model as well as the yaml config file sent as a dictionary"""
+        """Wrap a controller network for training.
+
+        Args:
+            model: the pytorch network to optimize.
+            config: the resolved config as a dictionary -- training.lr sets the
+                optimizer, and dataset.input_labels decides whether the last
+                input channel is a time channel ('t' or 'dt') to be split off
+                as timespans.
+        Returns:
+            Nothing; also saves the config as hyperparameters and prepares the
+            lists that test_step fills with predictions.
+        """
         super().__init__()
         # Hyperparameters and model
         self.lr = config['training']['lr']
@@ -65,14 +76,29 @@ class Lightning_Model(L.LightningModule):
         self.global_min, self.global_max = self.global_min.permute(0, 2, 1), self.global_max.permute(0, 2, 1)
 
     def forward(self, x, hx=None, timespans=None):
-        # Separate time channel if present
+        """Run the wrapped network.
+
+        Args:
+            x: inputs, time channel included when the config declared one.
+            hx: recurrent hidden state, None to start fresh.
+            timespans: explicit CfC timespans; when omitted and the config
+                declares a time channel, the last channel of `x` is used.
+        Returns:
+            Whatever the network returns (a tensor, or a (prediction, state)
+            pair for the recurrent ones).
+        """
         if self.with_time and timespans is None:
             timespans = x[:, :, -1:]
             x = x[:, :, :-1]
         return self.model(x, hx, timespans)
 
     def configure_optimizers(self):
-        # Use Adam optimizer with validation-loss plateau scheduling.
+        """Lightning hook: the optimizer.
+
+        Returns:
+            Adam at the config's lr, with no schedule -- utils.scheduler
+            subclasses this to add one.
+        """
         optimizer = torch.optim.Adam(self.model.parameters(), lr=self.lr)
         # scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
         #     optimizer,
@@ -92,16 +118,30 @@ class Lightning_Model(L.LightningModule):
         }
 
     def training_step(self, batch):
+        """Lightning hook: one optimization step.
+
+        Args:
+            batch: the (inputs, labels) pair.
+        Returns:
+            The training loss, logged as `train_loss`.
+        """
         self.model.train()
         return self._training_step_OL(batch, log_text='train_loss')
 
     def _split_time_channel(self, x):
-        """
-        Separate optional time features from the model inputs.
+        """Separate the optional time feature from the model inputs.
 
-        Training, validation, and testing all consume the same `(x, timespans)`
-        representation so there is only one place that needs to understand how
-        time is packed into the dataset tensors.
+        Training, validation and testing all consume the same
+        `(x, timespans)` representation, so there is only one place that needs
+        to understand how time is packed into the dataset tensors.
+
+        Args:
+            x: the batch inputs, rank 3 or 4.
+        Returns:
+            (inputs without the time channel, timespans), or (x, None) when the
+            config declares no time channel.
+        Raises:
+            ValueError: the input rank is neither 3 nor 4.
         """
         if not self.with_time:
             return x, None
@@ -115,18 +155,28 @@ class Lightning_Model(L.LightningModule):
         raise ValueError(f"Unsupported input rank for time splitting: {x.shape}")
 
     def _unwrap_model_output(self, output):
-        """
-        Normalize recurrent and feedforward model outputs to a prediction tensor.
+        """Reduce any network's output to a prediction tensor.
+
+        Args:
+            output: what the network returned -- recurrent models return a
+                (prediction, hidden state) pair, feedforward ones a tensor.
+        Returns:
+            The prediction alone.
         """
         return output[0] if isinstance(output, tuple) else output
 
     def _forward_open_loop(self, x, timespans=None, stepwise=False):
-        """
-        Run the controller in the same open-loop pathway used for optimization.
+        """Run the controller through the same pathway used for optimization.
 
-        `stepwise=True` preserves the recurrent one-step rollout used during
-        testing and simulation-style benchmarking, while reusing the exact same
-        input preparation and output unwrapping as the batch path.
+        Args:
+            x: inputs, time channel already split off.
+            timespans: the CfC timespans, or None.
+            stepwise: True replays the sequence one frame at a time, carrying
+                the hidden state -- the rollout used at test time, closer to
+                the simulator's execution path. False runs the whole batch at
+                once, which is what training does.
+        Returns:
+            The predictions, identical in shape either way.
         """
         if not stepwise:
             return self._unwrap_model_output(self.model(x, timespans=timespans))
@@ -143,8 +193,14 @@ class Lightning_Model(L.LightningModule):
         return torch.cat(predictions, dim=1)
 
     def _open_loop_loss(self, y_hat, y):
-        """
-        Compute the command-space MSE exactly once for every phase.
+        """Compute the command-space MSE, once for every phase.
+
+        Args:
+            y_hat: the predictions.
+            y: the expert commands.
+        Returns:
+            The MSE, replaced by 1e3 when it comes out NaN so a diverged batch
+            costs the run a bad score instead of poisoning every weight.
         """
         x_hat = y_hat.reshape(-1, y.shape[-1])
         y_flat = y.reshape(-1, y.shape[-1])
@@ -154,8 +210,16 @@ class Lightning_Model(L.LightningModule):
         return loss
 
     def _training_step_OL(self, batch, log_text='train_loss'):
-        """Open-loop: optimize motor command MSE only.
-        Use log_text as differentiator between training and validation."""
+        """Open loop: score the commands only, which is what both training and
+        validation do.
+
+        Args:
+            batch: the (inputs, labels) pair.
+            log_text: metric name, the only thing separating a training step
+                from a validation one.
+        Returns:
+            The loss, logged under that name.
+        """
         x, y = batch
         x, timespans = self._split_time_channel(x)
         y_hat = self._forward_open_loop(x, timespans=timespans)
@@ -164,12 +228,28 @@ class Lightning_Model(L.LightningModule):
         return loss
 
     def validation_step(self, batch):
+        """Lightning hook: score one validation batch.
+
+        Args:
+            batch: the (inputs, labels) pair.
+        Returns:
+            The loss, logged as `val_loss` -- the metric checkpointing and
+            early stopping watch.
+        """
         self.model.eval()
         return self._training_step_OL(batch, log_text='val_loss')
 
     def test_step(self, batch):
-        """
-        Run model in inference mode and collect predictions.
+        """Lightning hook: run inference and keep the predictions.
+
+        Args:
+            batch: the (inputs, labels) pair.
+        Returns:
+            {'test_loss': the loss}; the predictions, targets and runtime are
+            appended to all_yhat/all_target/all_runtime, which is where
+            evaluate_arrays reads them from. Every sample of the batch is
+            kept -- storing only the first scored one portion per batch, i.e.
+            1/batch_size of the split.
         """
         self.model.eval()
         x, y = batch
@@ -197,8 +277,13 @@ class Lightning_Model(L.LightningModule):
         return {'test_loss': loss}
 
     def backward(self, loss):
-        """
-        Override backward to retain computation graph if needed.
+        """Lightning hook: the backward pass, keeping the graph alive.
+
+        Args:
+            loss: the value to differentiate; a loss detached from the graph
+                (the NaN fallback above) is made differentiable again first.
+        Returns:
+            Nothing; gradients land on the parameters.
         """
         if not loss.requires_grad:
             loss.requires_grad=True

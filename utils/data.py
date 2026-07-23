@@ -19,12 +19,19 @@ from utils.normalization_limits import GLOBAL_MAX, GLOBAL_MIN
 
 
 def expand_feature_labels(labels):
-    """
-    Expand composite dataset labels to the actual feature-channel ordering.
+    """Expand composite dataset labels to the actual feature-channel ordering.
 
-    The dataset stores rotor speeds and commands as 4-vectors. Most configs
-    refer to them via the shorthand `omega` and `u`; downstream utilities need
-    the expanded channel layout to build masks and feature index lookups.
+    The quadrotor dataset stores rotor speeds and commands as 4-vectors. Most
+    configs refer to them via the shorthand `omega` and `u`; downstream
+    utilities need the expanded layout to build masks and index lookups.
+
+    Args:
+        labels: the channel names as a config spells them.
+    Returns:
+        The same list with `omega` replaced by omega1..omega4 and `u` by
+        u1..u4; every other name passes through unchanged. The landing
+        pipeline's labels are one channel each, so it calls the ablation
+        helpers with expand=False and this is a no-op for it.
     """
     expanded = []
     for label in labels:
@@ -47,7 +54,19 @@ class DatasetController(Dataset):
         length (int): Number of samples (trajectories).
     """
     def __init__(self, input, output):
-        # Transpose to (batch_size, timesteps, features) for PyTorch
+        """Wrap the training tensors for the DataLoader.
+
+        Args:
+            input: inputs as (samples, features, timesteps), rank 4 for the
+                sequenced layout.
+            output: labels in the same layout.
+        Returns:
+            Nothing; both are transposed to put the features last (what pytorch
+            expects) and converted to float32 tensors once here, so DataLoader
+            workers do not rebuild a tensor on every sample fetch.
+        Raises:
+            ValueError: an array is neither rank 3 nor rank 4.
+        """
         if input.ndim == 3:
             input_array = input.transpose(0, 2, 1)
         elif input.ndim == 4:
@@ -69,22 +88,35 @@ class DatasetController(Dataset):
         self.length = len(input)
 
     def __len__(self):
-        # Return number of trajectories
+        """Dataset size.
+
+        Returns:
+            The number of trajectories (portions, for the landing pipeline).
+        """
         return self.length
 
     def __getitem__(self, idx):
+        """Fetch one sample.
+
+        Args:
+            idx: its index.
+        Returns:
+            Its (input, output) tensor pair.
+        """
         return self.input[idx], self.output[idx]
 
 
 def get_norm_vectors(labels):
-    """
-    Build normalization vectors (min and max) for each feature in `labels`.
+    """Build the normalisation vectors of the quadrotor's fixed limit tables.
 
     Args:
-        labels (list[str]): List of feature names to normalize.
+        labels: the channel names; those absent from the tables are skipped,
+            so the landing pipeline -- which normalises in build_dataset with
+            its own bounds -- gets empty vectors here and is unaffected.
     Returns:
-        global_min (np.ndarray): Min values reshaped for broadcasting.
-        global_max (np.ndarray): Max values reshaped for broadcasting.
+        (global_min, global_max), each shaped (1, features, 1) for
+        broadcasting. The omega block is expanded to its 4 motors, and a
+        't'/'dt' channel is bounded to [0, 1].
     """
     global_min = []
     global_max = []
@@ -121,27 +153,34 @@ def get_data(input_labels,
              normalized=True,
              with_noise=False,
              with_bias=False):
-    """
-    Load and preprocess specified trajectories from a .npz dataset file.
+    """Load and preprocess trajectories from the quadrotor .npz dataset.
 
-    Steps:
-      1. Load raw arrays for input and output labels.
-      2. Compute auxiliary derived features (e.g., distance_error, attitude_error).
-      3. Split multi-dimensional signals (e.g., omega, u) into separate channels.
-      4. Generate time-step array (t or dt) per trajectory.
-      5. Stack features into contiguous arrays and optionally normalize.
+    The landing pipeline does NOT go through here: its data is long continuous
+    runs, not fixed-length trajectories, so it has its own
+    boeing_landing/data/loader.py.
+
+    Steps: load the raw arrays, compute the derived features
+    (distance_error, attitude_error), split the 4-vectors into channels, build
+    the t/dt channel, stack and optionally normalise.
 
     Args:
-        input_labels (list[str]): List of input features names.
-        output_labels (list[str]): List of output features names.
-        path (str): The dataset path where the values can be taken from as .npz format.
-        starting_trajectory (int): The trajectory index where to start taking data from.
-        desired_trajectories (int): The number of consecutive trajectories to be processed.
-        normalized (bool): If normalised is necessary, use this
+        input_labels: input channel names.
+        output_labels: output channel names.
+        path: the .npz, relative to the repo root.
+        starting_trajectory: first trajectory to take (default 0).
+        desired_trajectories: how many consecutive ones (default: all).
+        normalized: rescale the inputs with the fixed limit tables.
+        with_noise: add noise to the inputs. BROKEN as written -- the block
+            iterates `dataset_input`, which was deleted a few lines above, so
+            switching it on raises. It also ends on a stray
+            `reduced_array_input += noise` that would broadcast the LAST
+            channel's noise onto every channel. The landing pipeline
+            implements its own input noise in its loader instead.
+        with_bias: add a constant per-trajectory bias. Broken the same way.
 
     Returns:
-        reduced_array_input  (np.ndarray): Shape (T_selected, features, timesteps).
-        reduced_array_output (np.ndarray): Shape (T_selected, features, timesteps).
+        (inputs, outputs), each (trajectories, features, timesteps), with the
+        dt channel appended last when the config asked for one.
     """
     # Determine absolute file path
     cur_path = os.path.dirname(__file__)
@@ -282,15 +321,19 @@ def get_data(input_labels,
 
 
 def transform_to_sequence(data, seq_len=100):
-    """
-    Convert continuous time-series data into overlapping sequences.
+    """Convert continuous time series into overlapping windows.
 
     Args:
-        data (np.ndarray): Array shaped (samples, features, timesteps).
-        seq_len (int): Desired window length for each sequence.
+        data: array shaped (samples, features, timesteps).
+        seq_len: window length; 1 keeps a single frame per window, which is the
+            conv_cfc recipe both pipelines use.
     Returns:
-        data_seq (np.ndarray): Flattened array of shape
-            (samples * (timesteps - seq_len), seq_len, features).
+        A sliding-window view shaped (samples, features, windows, seq_len) --
+        a view, so no copy is made. That layout is the one the convolutional
+        controllers expect.
+    Raises:
+        ValueError: seq_len below 1, longer than the trajectory, or data of the
+            wrong rank.
     """
     if seq_len < 1:
         raise ValueError("seq_len must be at least 1.")

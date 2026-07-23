@@ -32,6 +32,15 @@ class SimpleRNN(nn.Module):
                  input_dim: int,
                  hidden_dim: int,
                  output_dim: int) -> None:
+        """Build the RNN and its readout.
+
+        Args:
+            input_dim: input channels per frame.
+            hidden_dim: recurrent width.
+            output_dim: command count.
+        Returns:
+            Nothing.
+        """
         super().__init__()
         self.hidden_dim = hidden_dim
         # Batch-first RNN layer
@@ -41,23 +50,26 @@ class SimpleRNN(nn.Module):
 
     @property
     def state_size(self):
+        """The hidden state width, which callers need to size a rollout.
+
+        Returns:
+            hidden_dim.
+        """
         return self.hidden_dim
 
     def forward(self,
                 x: torch.Tensor,
                 hx: torch.Tensor = None,
                 timespans: torch.Tensor = None) -> tuple[torch.Tensor, torch.Tensor]:
-        """
-        Step through input sequence one time step at a time.
+        """Step through the input sequence one frame at a time.
 
         Args:
-            x: input [batch, seq_length, input_dim]
-            hx: optional initial hidden state [batch, 1, hidden_dim]
-            timespans: unused placeholder for API consistency
-
+            x: inputs [batch, seq_length, input_dim].
+            hx: initial hidden state [batch, 1, hidden_dim], None to start
+                from zero.
+            timespans: unused, present for API consistency with the CfC.
         Returns:
-            readout: the whole output [batch, seq_length, output_dim]
-            hx: final hidden state [batch, 1, hidden_dim]
+            (readout [batch, seq_length, output_dim], final hidden state).
         """
         batch_size, seq_len, _ = x.size()
         outputs = []
@@ -76,7 +88,18 @@ class SimpleRNN(nn.Module):
 
 
 class RecurrentLayer(torch.nn.Module):
+    """The continuous-time recurrent layer inside CTRNN: a leaky update with a
+    fixed time constant, plus optional pre/post-activation noise."""
+
     def __init__(self, input_dim, hidden_size):
+        """Build the input and hidden projections.
+
+        Args:
+            input_dim: input channels per frame.
+            hidden_size: recurrent width.
+        Returns:
+            Nothing.
+        """
         super().__init__()
         self.alpha = 0.95  # time constant
         self.preact_noise, self.postact_noise = 0.0, 0.0
@@ -86,7 +109,18 @@ class RecurrentLayer(torch.nn.Module):
         self.hidden_layer = torch.nn.Linear(hidden_size, hidden_size)
     
     def recurrence(self, fr_t, v_t, u_t):
-        """ Recurrence function """
+        """One update step of the leaky recurrence.
+
+        Args:
+            fr_t: current firing rates (the activated state).
+            v_t: current membrane potentials (the pre-activation state).
+            u_t: this frame's input.
+        Returns:
+            (fr_t, v_t) after the step: the potentials blend the previous ones
+            with the new drive through alpha, and the rates are their
+            activation. Noise is added only when the corresponding attribute
+            was set above 0.
+        """
         # through input layer
         w_in_u_t = self.input_layer(u_t)  # u_t @ W_in
         # through hidden layer
@@ -110,10 +144,16 @@ class RecurrentLayer(torch.nn.Module):
         return fr_t, v_t
     
     def forward(self, input, fr_t=None, timespans=None):
-        """
-        Propogate input through the network.
-        @param input: shape=(seq_len, batch, input_dim), network input
-        @return stacked_states: shape=(seq_len, batch, hidden_size), stack of hidden layer status
+        """Propagate a whole sequence through the layer.
+
+        Args:
+            input: shape (seq_len, batch, input_dim) -- time first here, unlike
+                the batch-first modules around it.
+            fr_t: initial firing rates, None to start from the activation of a
+                zero state.
+            timespans: unused, present for API consistency.
+        Returns:
+            The hidden states stacked over time, (seq_len, batch, hidden_size).
         """
         v_t = torch.zeros((input.size(1), self.hidden_size), device=input.device)
         if fr_t is None:
@@ -129,7 +169,18 @@ class RecurrentLayer(torch.nn.Module):
 
 
 class CTRNN(torch.nn.Module):
+    """Continuous-time RNN: a RecurrentLayer plus a linear readout."""
+
     def __init__(self, input_dim, hidden_dim, output_dim):
+        """Build the recurrent layer and its readout.
+
+        Args:
+            input_dim: input channels per frame.
+            hidden_dim: recurrent width.
+            output_dim: command count.
+        Returns:
+            Nothing.
+        """
         super().__init__()
         self.input_dim = input_dim
         self.hidden_dim = hidden_dim
@@ -139,9 +190,24 @@ class CTRNN(torch.nn.Module):
 
     @property
     def state_size(self):
+        """The hidden state width.
+
+        Returns:
+            hidden_dim.
+        """
         return self.hidden_dim
 
     def forward(self, inputs, hx=None, timespans=None):
+        """Run the sequence and read the commands out of the hidden states.
+
+        Args:
+            inputs: (batch, seq_len, input_dim); transposed internally, the
+                recurrent layer working time-first.
+            hx: initial firing rates, None to start from zero.
+            timespans: unused, present for API consistency.
+        Returns:
+            (predictions (batch, seq_len, output_dim), the LAST hidden state).
+        """
         inputs = inputs.permute(1, 0, 2)  # (seq_len, batch, input_dim)
         hx = self.recurrent_layer(inputs, hx, timespans)
         output = self.readout_layer(hx.float())
@@ -153,7 +219,20 @@ class CTRNN(torch.nn.Module):
 
 
 class GRU(torch.nn.Module):
+    """Gated recurrent unit baseline: torch's GRU plus a linear readout."""
+
     def __init__(self, input_dim, hidden_dim, output_dim, batch_first=True):
+        """Build the GRU and its readout.
+
+        Args:
+            input_dim: input channels per frame.
+            hidden_dim: recurrent width.
+            output_dim: command count.
+            batch_first: keep the batch on axis 0, as the rest of the pipeline
+                does.
+        Returns:
+            Nothing.
+        """
         super().__init__()
         self.input_dim = input_dim
         self.hidden_dim = hidden_dim
@@ -163,9 +242,25 @@ class GRU(torch.nn.Module):
 
     @property
     def state_size(self):
+        """The hidden state width.
+
+        Returns:
+            hidden_dim.
+        """
         return self.hidden_dim
-    
+
     def forward(self, inputs, hx=None, timespans=None):
+        """Run the sequence.
+
+        Args:
+            inputs: (batch, seq_len, input_dim).
+            hx: initial hidden state (batch, hidden_dim), None to start from
+                zero; it is given the layer axis torch expects.
+            timespans: unused, present for API consistency.
+        Returns:
+            (predictions (batch, seq_len, output_dim), the final hidden state
+            without its layer axis).
+        """
         if hx is not None:
             hx = hx.unsqueeze(0)  # (1, batch, hidden_dim)
         hidden_states, hx = self.gru(inputs, hx)
@@ -174,7 +269,19 @@ class GRU(torch.nn.Module):
 
 
 class LSTM(torch.nn.Module):
+    """LSTM baseline: torch's LSTM plus a linear readout."""
+
     def __init__(self, input_dim, hidden_dim, output_dim, batch_first=True):
+        """Build the LSTM and its readout.
+
+        Args:
+            input_dim: input channels per frame.
+            hidden_dim: recurrent width.
+            output_dim: command count.
+            batch_first: keep the batch on axis 0.
+        Returns:
+            Nothing.
+        """
         super().__init__()
         self.input_dim = input_dim
         self.hidden_dim = hidden_dim
@@ -184,9 +291,25 @@ class LSTM(torch.nn.Module):
 
     @property
     def state_size(self):
+        """The hidden state width (the cell state has the same one).
+
+        Returns:
+            hidden_dim.
+        """
         return self.hidden_dim
-    
+
     def forward(self, inputs, hx=None, timespans=None):
+        """Run the sequence.
+
+        Args:
+            inputs: (batch, seq_len, input_dim).
+            hx: initial (hidden, cell) pair, None to start from zero.
+            timespans: unused, present for API consistency.
+        Returns:
+            (predictions (batch, seq_len, output_dim), the final (hidden, cell)
+            pair) -- a pair, unlike the other families, which is why callers
+            must not assume the state is a single tensor.
+        """
         if hx is not None:
             h_n, c_n = hx
             h_n = h_n.unsqueeze(0)  # (1, batch, hidden_dim)
