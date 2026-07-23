@@ -21,6 +21,7 @@ boeing_landing/           project code
     gps_cfc/                  base.yaml + quick/long variants (extends), README
     ils_aligned_cfc/          GPS -> runway/ILS-aligned NED: augment_ned.py, plot, base.yaml
     magnetic_north_cfc/       GPS -> magnetic-north NED: augment_magnetic.py, base.yaml
+    ned_wind_cfc/             85 runs / 8 airports, wind as an input: prepare.py, encoder arms
   experiments/feature_order.py   sweep conv channel orders
   experiments/convergence.py     seed-stability study
   train.py                  assemble + fit_and_save (generic, config-driven)
@@ -100,17 +101,16 @@ other CSV columns as-is. Each pipeline config owns its dataset directory
 accepts (`OPT=value`); options in brackets are optional and show their default.
 
 ```bash
-make dataset CONFIG=<pipeline> [CSV=path/to.csv]
-    # build the npz. CONFIG: pipeline whose build: section decides input set /
-    # val runs / out dir (gps_cfc, ils_aligned_cfc, magnetic_north_cfc). CSV:
-    # source file; optional for the frame pipelines (falls back to their
-    # augment.out_csv), required for gps_cfc.
-
-make augment CONFIG=<pipeline> [RAW_CSV=datasets/ldg_dataset_images.csv] [NAVDB=datasets/NavDB_MFS.json]
-    # augment RAW_CSV the way CONFIG's augment: block says (which augmentation
-    # module, which out_csv). CONFIG = ils_aligned_cfc or magnetic_north_cfc; it
-    # is required (gps_cfc has no augment: block). Sources are read-only; runways
-    # missing from the NavDB keep NaN.
+make dataset CONFIG=<pipeline> [CSV=path/to.csv] [FORCE=1]
+    # raw delivery -> csv -> npz, in one command. CONFIG: pipeline whose build:
+    # section decides input set / label set / train and val runs / out dir. The
+    # csv the build needs is produced on the way when it is missing, from the
+    # pipeline's own upstream block -- `prepare:` renames a raw delivery
+    # (ned_wind_cfc), `augment:` adds the local-frame coordinates
+    # (ils_aligned_cfc, magnetic_north_cfc). Sources are read-only; runways
+    # missing from the NavDB keep NaN. CSV: override the source (required for
+    # gps_cfc, which declares no upstream step). FORCE=1 re-runs that step even
+    # if its csv already exists.
 
 make trajectories [NED_CSV=datasets/ldg_dataset_images_ned.csv] [SAVE=1]
     # plot the approaches of an augmented csv: top view, vertical profile, and
@@ -137,6 +137,9 @@ make train CONFIG=<pipeline> [ORDER=...] [EPOCHS=n]
 
 make evaluate RUN=runs/<pipeline>/<variant>/<timestamp>
     # metrics + feature-group ablations; writes evaluation.json into the run dir.
+    # With several validation runs, also prints one line per held-out run: a
+    # single averaged score cannot tell "does not extrapolate" from "has not
+    # converged", per-run scores can.
 
 make plots RUNS="runs/.../<ts> [more...]" [SAVE=1] [BARS=1] [NOISE=0.005]
     # one run: curves + per-command MSE + ablation panels; several: comparison.

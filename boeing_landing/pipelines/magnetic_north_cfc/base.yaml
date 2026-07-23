@@ -5,7 +5,7 @@
 # either way -- only the frame azimuth differs. The magnetic axis is the one an
 # onboard magnetometer defines, where the runway axis comes from the ILS localiser
 # (ground infrastructure); comparing the two isolates the effect of that choice.
-# Feed it the augmented csv:  make dataset CSV=datasets/ldg_dataset_images_mag.csv CONFIG=magnetic_north_cfc
+# One command does the whole chain:  make dataset CONFIG=magnetic_north_cfc
 # Paths are relative to the repo root (run from onera_boeing_landing/).
 
 training:
@@ -20,10 +20,12 @@ training:
   early_stopping_patience: 0 # >0 stops after N epochs without val improvement; 0 = off
   log_every_n_steps: 1       # write metrics.csv every n steps; 0 = no logging at all
 
-# csv augmentation step (make augment CONFIG=magnetic_north_cfc). Dispatched by
+# csv augmentation step, run by `make dataset` when its out_csv is missing. Dispatched by
 # boeing_landing.data.augment: which augmentation to run, and where it writes.
 augment:
   module: boeing_landing.pipelines.magnetic_north_cfc.augment_magnetic
+  raw_csv: datasets/ldg_dataset_images.csv   # read-only source
+  navdb: datasets/NavDB_MFS.json
   out_csv: datasets/ldg_dataset_images_mag.csv
 
 # npz build step (make dataset). The source CSV stays a CLI arg (machine-specific).

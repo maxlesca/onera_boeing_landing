@@ -58,6 +58,36 @@ stay diffs against their base.
 2. adapt `data/build_dataset.py` if the CSV columns change;
 3. rebuild with `make dataset`, then create the pipeline config.
 
+Fixed normalisation bounds are data, not code: they live in
+`data/physical_bounds.yaml`, never in a Python dict.
+
+## Adding a new data delivery
+
+A delivery arrives with its own column names and its own side tables; the build
+step expects one canonical `;`-separated csv. Write that translation as a module
+exposing
+
+```python
+prepare(sims: DataFrame, side: DataFrame) -> (DataFrame, list_of_warnings)
+```
+
+and declare it in the pipeline config:
+
+```yaml
+prepare:
+  module: boeing_landing.pipelines.<pipeline>.prepare
+  sims_csv: datasets/<delivery>.csv
+  side_csv: datasets/<side table>.csv
+  out_csv: datasets/<canonical>.csv
+```
+
+`make dataset` runs it when `out_csv` is missing, so a delivery still takes one
+command (`FORCE=1` re-runs it). Rename only the columns the repo already knows
+under another name, drop what no input set uses, and never recompute a value —
+a preparation step that transforms data is a source of silent divergence between
+what was delivered and what was trained on. `augment:` is the same mechanism for
+a step that must *derive* columns (the local-frame geodesy).
+
 ## Adding a new model family
 
 Add it to `utils/model_builder.py` — the single factory used by every

@@ -4,8 +4,8 @@
 Each frame pipeline names, in its `augment:` config block, the augmentation
 module to run and the output csv. Every augmentation exposes the same contract
 (`augment(df, navdb) -> (df, missing)` and a `POS_COLUMNS` list), so this
-dispatches by config -- `make augment CONFIG=<pipeline>` augments the raw data
-the way that pipeline expects, instead of one make target per frame.
+dispatches by config. It is not a target of its own: `make dataset` runs it when
+the augmented csv is missing, so one command builds the whole chain.
 
 Pipelines that need no augmentation (e.g. gps_cfc uses the raw GPS directly)
 simply have no `augment:` section.
@@ -24,36 +24,49 @@ import pandas as pd
 from boeing_landing.data.geodesy import load_navdb
 
 
-def main() -> None:
-    from boeing_landing.config import load_config
-    from boeing_landing.train import DEFAULT_CONFIG
-
-    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("source", type=Path, help="raw ldg_*.csv (read-only)")
-    ap.add_argument("navdb", type=Path, help="NavDB json (read-only)")
-    ap.add_argument("--config", type=Path, default=DEFAULT_CONFIG,
-                    help="pipeline config holding the augment: section")
-    ap.add_argument("-o", "--output", type=Path, default=None,
-                    help="output csv (default: the config's augment.out_csv)")
-    a = ap.parse_args()
-
-    cfg = load_config(a.config).get("augment")
+def run_augment(config: dict, source: Path | None = None, navdb: Path | None = None,
+                output: Path | None = None) -> Path:
+    """Dispatch to the pipeline's augmentation module and write its output csv.
+    Paths default to the config's `augment:` block, so the build step can call
+    this on its own -- one command builds the whole chain."""
+    cfg = config.get("augment")
     if not cfg:
-        raise SystemExit(f"{a.config} has no `augment:` section -- this pipeline "
+        raise SystemExit("this config has no `augment:` section -- its pipeline "
                          "uses the raw csv directly (e.g. gps_cfc), nothing to augment")
-    out = a.output or Path(cfg["out_csv"])
-    if out.resolve() in (a.source.resolve(), a.navdb.resolve()):
+    source = source or Path(cfg["raw_csv"])
+    navdb = navdb or Path(cfg["navdb"])
+    out = output or Path(cfg["out_csv"])
+    if out.resolve() in (source.resolve(), navdb.resolve()):
         raise SystemExit("refusing to overwrite an input file")
 
     module = importlib.import_module(cfg["module"])
-    df = pd.read_csv(a.source, sep=";", low_memory=False)
-    augmented, missing = module.augment(df, load_navdb(a.navdb))
+    df = pd.read_csv(source, sep=";", low_memory=False)
+    augmented, missing = module.augment(df, load_navdb(navdb))
+    out.parent.mkdir(parents=True, exist_ok=True)
     augmented.to_csv(out, sep=";", index=False)
 
     done = augmented[module.POS_COLUMNS[0]].notna()
     print(f"{done.sum()}/{len(augmented)} rows augmented ({cfg['module']}) -> {out}")
     for airport, runway, n in missing:
         print(f"  WARNING: {airport} {runway} not in the nav database ({n} rows left NaN)")
+    return out
+
+
+def main() -> None:
+    from boeing_landing.config import load_config
+    from boeing_landing.train import DEFAULT_CONFIG
+
+    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument("source", type=Path, nargs="?", default=None,
+                    help="raw ldg_*.csv (read-only; default: the config's augment.raw_csv)")
+    ap.add_argument("navdb", type=Path, nargs="?", default=None,
+                    help="NavDB json (read-only; default: the config's augment.navdb)")
+    ap.add_argument("--config", type=Path, default=DEFAULT_CONFIG,
+                    help="pipeline config holding the augment: section")
+    ap.add_argument("-o", "--output", type=Path, default=None,
+                    help="output csv (default: the config's augment.out_csv)")
+    a = ap.parse_args()
+    run_augment(load_config(a.config), a.source, a.navdb, a.output)
 
 
 if __name__ == "__main__":

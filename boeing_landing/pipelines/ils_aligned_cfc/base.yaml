@@ -4,7 +4,7 @@
 # (pos_along/cross/up, from augment_ned.py). GPS is not removed, only re-expressed,
 # so the network sees along-runway and cross-track offsets instead of the absolute
 # coordinate it was memorising. ILS stays out (as in gps_cfc).
-# Feed it the augmented csv:  make dataset CSV=datasets/ldg_dataset_images_ned.csv CONFIG=ils_aligned_cfc
+# One command does the whole chain:  make dataset CONFIG=ils_aligned_cfc
 # Paths are relative to the repo root (run from onera_boeing_landing/).
 
 training:
@@ -19,10 +19,12 @@ training:
   early_stopping_patience: 0 # >0 stops after N epochs without val improvement; 0 = off
   log_every_n_steps: 1       # write metrics.csv every n steps; 0 = no logging at all
 
-# csv augmentation step (make augment CONFIG=ils_aligned_cfc). Dispatched by
+# csv augmentation step, run by `make dataset` when its out_csv is missing. Dispatched by
 # boeing_landing.data.augment: which augmentation to run, and where it writes.
 augment:
   module: boeing_landing.pipelines.ils_aligned_cfc.augment_ned
+  raw_csv: datasets/ldg_dataset_images.csv   # read-only source
+  navdb: datasets/NavDB_MFS.json
   out_csv: datasets/ldg_dataset_images_ned.csv
 
 # npz build step (make dataset). The source CSV stays a CLI arg (machine-specific).

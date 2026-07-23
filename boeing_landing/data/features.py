@@ -28,6 +28,24 @@ NED_VELOCITY = ["northsouth_velocity", "eastwest_velocity", "vertical_velocity"]
 # (u,v,w are ground-relative) -- the aircraft analogue of the quadrotor
 # baseline's M_ext disturbance inputs.
 WIND = ["wind_velocity_x", "wind_velocity_y", "wind_velocity_z"]
+# Rotational gust components of the turbulence model (rad/s): the spatial
+# gradient of the wind field across the airframe acts as an apparent rotation of
+# the air mass (Dryden/von Karman p_g, q_g, r_g). Only the 85-run delivery
+# carries them; ned_wind_cfc/prepare.py renames them into these canonical names.
+# NOTE: in that delivery wind_rate_y = 0.845529 * wind_rate_x exactly (ratio
+# constant over all 223739 rows), so after normalisation it is the same channel
+# twice -- kept on purpose, only two of the three carry information.
+WIND_RATE = ["wind_rate_x", "wind_rate_y", "wind_rate_z"]
+# Weight-on-wheels. A causal sensor (available in real time at inference) and
+# the command law changes completely at touchdown, so it is an input, not a
+# label. It is a ramp (0.2, 0.4 ... 1.0) over the last few frames, not a boolean.
+# A "time to touchdown" channel would be far more informative and is deliberately
+# NOT built: it is not causal, it would be leakage.
+TOUCHDOWN = ["touchdown_flag"]
+# Position in the local NED frame at the landing threshold, as delivered (north,
+# east, down -- geographic axes, NOT runway-aligned). Already in the csv, so no
+# geodesy step is needed for this pipeline (contrast with POS_RUNWAY below).
+POS_NED = ["x_error_NED", "y_error_NED", "z_error_NED"]
 
 # Canonical order used when building the npz. Everything else is a permutation.
 # An optional per-frame dt channel (CfC timespans) is appended at load time by
@@ -48,6 +66,16 @@ INERTIAL = ATTITUDE_LOCAL + ANGULAR_RATES + BODY_VELOCITY + NED_VELOCITY + WIND
 POS_RUNWAY = ["pos_along", "pos_cross", "pos_up"]
 POS_MAGNETIC = ["pos_north_mag", "pos_east_mag", "pos_up_mag"]
 
+# The inertial core of the 85-run delivery (ned_wind_cfc). Differences with
+# INERTIAL above: the NED velocity block is dropped (u,v,w already carry the
+# ground velocity, in body axes), and the wind block gains its rotational
+# components plus the weight-on-wheels channel. Channel for channel this is
+# Tudor's quadrotor input set -- wind_* plays the role of his M_ext external
+# disturbance, the variable the expert compensates and the network could not see
+# in the previous delivery (see DOC 8.19.5).
+INERTIAL_NED = (ATTITUDE_LOCAL + ANGULAR_RATES + BODY_VELOCITY
+                + WIND + WIND_RATE + TOUCHDOWN)
+
 # The input set a dataset is built with (build.input_set in the config). Each is
 # the ordered list of CSV columns stored as inputs; extra_columns append to it.
 # ILS is in none of them (dropped since gps_cfc); the difference is only how the
@@ -56,6 +84,9 @@ INPUT_SETS = {
     "gps": CANONICAL_INPUTS,             # GPS as absolute lat/lon/alt + inertial (default, gps_cfc)
     "ils_aligned": POS_RUNWAY + INERTIAL,      # GPS converted to runway/ILS-aligned coords + inertial
     "magnetic_north": POS_MAGNETIC + INERTIAL,  # GPS converted to magnetic-north coords + inertial
+    # 85-run delivery (ned_wind_cfc). 20 channels; the loader appends dt -> 21.
+    # The position is used exactly as delivered -- no frame conversion at all.
+    "ned_wind": POS_NED + INERTIAL_NED,
 }
 
 # throttle_right mirrors throttle_left exactly in the source data (checked:
@@ -63,6 +94,26 @@ INPUT_SETS = {
 # the full command set -- it doubles the throttle weight in the MSE.
 LABELS = ["longitudinal", "lateral", "directional", "stabilizer",
           "throttle_left", "throttle_right"]
+
+# Every command channel the simulator logs, flap and speedbreak included
+# (ned_wind_cfc). Three of them are strictly constant on the 85-run delivery
+# (directional = 0, flap = 30, speedbreak = 0) and throttle_right duplicates
+# throttle_left, so only four carry signal. Consequence to keep in mind when
+# reading numbers: the constant channels are learnt as a flat 0 in one epoch, so
+# val_loss is mechanically deflated and is NOT comparable to a 6-label run --
+# compare per-channel R2 instead, which returns NaN on them and skips them.
+LABELS_FULL = ["longitudinal", "lateral", "directional", "flap", "speedbreak",
+               "stabilizer", "throttle_left", "throttle_right"]
+
+# Label sets a pipeline can pick from (`build.label_set` in the config). The
+# chosen list is written into the npz as label_names and travels with the data.
+LABEL_SETS = {"commands": LABELS, "commands_full": LABELS_FULL}
+
+# Neither inputs nor labels: side columns carried into the npz when the source
+# csv has them, and skipped without complaint when it does not. The 85-run
+# delivery is state-only (no camera), so it has no image_filename -- listing the
+# column here is what lets one build step serve both deliveries.
+OPTIONAL_COLUMNS = ["image_filename"]
 
 def extend_order(order: list[str], available: list[str]) -> list[str]:
     """`order` completed with the channels the dataset holds beyond it (e.g.
@@ -103,4 +154,5 @@ FEATURE_ORDERS = {
     # lat/lon, so the lat/lon-based orders above do not apply to them.
     "ils_aligned": INPUT_SETS["ils_aligned"],
     "magnetic_north": INPUT_SETS["magnetic_north"],
+    "ned_wind": INPUT_SETS["ned_wind"],
 }

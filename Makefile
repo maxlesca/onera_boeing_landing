@@ -14,7 +14,7 @@ ORDER   ?=
 CFGPATH  = $(if $(findstring .yaml,$(CONFIG)),$(if $(findstring /,$(CONFIG)),$(CONFIG),boeing_landing/pipelines/$(basename $(CONFIG))/base.yaml),$(if $(findstring /,$(CONFIG)),boeing_landing/pipelines/$(CONFIG).yaml,boeing_landing/pipelines/$(CONFIG)/base.yaml))
 
 .DEFAULT_GOAL := help
-.PHONY: help install deps dataset augment trajectories data-report run-report train evaluate plots plots-orders \
+.PHONY: help install deps dataset trajectories data-report run-report train evaluate plots plots-orders \
         experiment-order experiment-convergence loro loro-plot quadrotor-train quadrotor-test clean
 
 help:  ## show this help
@@ -28,18 +28,14 @@ install:  ## create .venv and install dependencies
 deps:  ## install dependencies into the detected interpreter
 	$(PYTHON) -m pip install -r requirements.txt
 
-dataset:  ## build the npz: make dataset CONFIG=ils_aligned_cfc (frame pipelines read augment.out_csv; add CSV=... to override, required for gps_cfc)
-	$(PYTHON) -m boeing_landing.data.build_dataset $(CSV) --config $(CFGPATH)
+# One command for the whole data chain. The pipeline declares its upstream step
+# in its own config -- `prepare:` (rename a raw delivery) or `augment:` (add the
+# local-frame coordinates) -- and the build runs it when its csv is missing.
+# Sources stay read-only. FORCE=1 re-runs that step even if the csv is there.
+dataset:  ## raw delivery -> csv -> npz, in one go: make dataset CONFIG=ned_wind_cfc [FORCE=1] (CSV=... overrides the source, required for gps_cfc)
+	$(PYTHON) -m boeing_landing.data.build_dataset $(CSV) --config $(CFGPATH) $(if $(FORCE),--force)
 
-# csv augmentation (sources are read-only). The augmentation to run and where it
-# writes come from the pipeline's `augment:` config, so one target serves every
-# frame: make augment CONFIG=ils_aligned_cfc  /  CONFIG=magnetic_north_cfc.
-RAW_CSV ?= datasets/ldg_dataset_images.csv
-NAVDB   ?= datasets/NavDB_MFS.json
 NED_CSV ?= datasets/ldg_dataset_images_ned.csv
-
-augment:  ## augment the raw csv the way CONFIG says: make augment CONFIG=ils_aligned_cfc [RAW_CSV=...]
-	$(PYTHON) -m boeing_landing.data.augment $(RAW_CSV) $(NAVDB) --config $(CFGPATH)
 
 trajectories:  ## plot the approaches of the augmented csv: make trajectories [NED_CSV=...] [SAVE=1]
 	$(PYTHON) -m boeing_landing.pipelines.ils_aligned_cfc.plot_runway_frame $(NED_CSV) $(if $(SAVE),--save)
