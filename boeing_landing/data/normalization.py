@@ -7,16 +7,22 @@ min-max helpers. build_dataset and loader only call into this module -- no
 normalisation constant is defined anywhere else.
 
 Two kinds of bounds:
-- fixed physical bounds (below): airport-independent, chosen from the approach
-  envelope to CONTAIN the data with margin so they never clip and stay stable
-  across airports/deliveries. Used when a pipeline sets `build.physical_bounds`.
+- fixed physical bounds: airport-independent, chosen from the approach envelope
+  to CONTAIN the data with margin so they never clip and stay stable across
+  airports/deliveries. Used when a pipeline sets `build.physical_bounds`. The
+  numbers live in physical_bounds.yaml next to this file -- they are data, not
+  code, so they are tuned there and reviewed without reading Python.
 - data-driven: the train-split min/max, computed for any channel without a fixed
   bound (and for every channel when physical_bounds is off, e.g. gps_cfc).
 """
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import numpy as np
+
+from utils.config import load_yaml
 
 # Names of the sin/cos channels a heading expands into (kept here so the encoding
 # and its bounds stay together); features.py imports this to lay out the channels.
@@ -31,51 +37,29 @@ ANGLE_ENCODINGS = {
     "heading_cos": ("heading", np.cos),
 }
 
-# Fixed physical bounds (min, max). Position is in metres at the runway threshold;
-# attitude in radians. Ranges observed on the ZBTJ data are noted for reference;
-# the bounds are the approach envelope (wider), not a dataset fit -- tune here.
+# The two tiers of fixed bounds, read from physical_bounds.yaml (channel ->
+# [min, max]) -- the numbers are data, not code, so they are tuned and reviewed
+# in the yaml. Loaded once at import: the table is constant, so no pipeline can
+# silently ship bounds other than the ones the yaml documents.
 #
 # Two tiers, selected by build.physical_bounds:
-#   true / "core" -> _CORE_BOUNDS only (position + attitude);
-#   "all"         -> _CORE_BOUNDS + _EXTENDED_BOUNDS (also wind, velocities, rates).
+#   true / "core" -> the `core` tier only (position + attitude);
+#   "all"         -> `core` + `extended` (also wind, velocities, rates).
 # The extended tier matters for out-of-distribution robustness: with data-driven
 # bounds a held-out run whose wind is outside the train range normalises OUTSIDE
 # [0,1] (extrapolation); a fixed operational envelope keeps it in range.
-_CORE_BOUNDS = {
-    # attitude (rad) -- sourced envelope: pitch approach, bank CS-25 40 deg max
-    "pitch": (-0.35, 0.35),   # ~20 deg   (data ~ +-0.12)
-    "bank":  (-0.70, 0.70),   # ~40 deg   (data ~ +-0.14)
-    "heading_sin": (-1.0, 1.0),   # sin/cos bounded by construction
-    "heading_cos": (-1.0, 1.0),
-    # runway-frame position (m): threshold origin, runway-aligned axes
-    "pos_along": (-15000.0, 500.0),   # along runway   (data -11933 .. -54)
-    "pos_cross": (-500.0, 500.0),     # cross track    (data -113 .. 181)
-    "pos_up":    (0.0, 1000.0),       # height a/g     (data 21 .. 621)
-    # magnetic-frame position (m): geographic axes. North and east SHARE the same
-    # bound -- a runway of arbitrary QFU projects its full length onto both, so
-    # fixing them symmetrically is what makes the frame airport-independent.
-    "pos_north_mag": (-15000.0, 15000.0),
-    "pos_east_mag":  (-15000.0, 15000.0),
-    "pos_up_mag":    (0.0, 1000.0),
-}
+BOUNDS_FILE = Path(__file__).with_name("physical_bounds.yaml")
 
-# Extended tier (build.physical_bounds: all) -- sourced operational envelope from
-# the 737 FCTM / CS-25 (see DOC 8.13), wide enough to contain a held-out run's
-# wind/velocities so they normalise inside [0,1] instead of extrapolating.
-_EXTENDED_BOUNDS = {
-    "wind_velocity_x": (-20.0, 20.0),   # crosswind/tailwind envelope (m/s)
-    "wind_velocity_y": (-20.0, 20.0),
-    "wind_velocity_z": (-5.0, 5.0),
-    "u": (0.0, 120.0),                  # body velocities (m/s)
-    "v": (-15.0, 15.0),
-    "w": (-10.0, 10.0),
-    "northsouth_velocity": (-120.0, 120.0),   # NEU velocities (m/s)
-    "eastwest_velocity":   (-120.0, 120.0),
-    "vertical_velocity":   (-10.0, 10.0),
-    "p": (-0.5, 0.5),                   # body rates (rad/s)
-    "q": (-0.5, 0.5),
-    "r": (-0.5, 0.5),
-}
+
+def load_bounds_file(path: Path = BOUNDS_FILE) -> tuple[dict, dict]:
+    """The (core, extended) tiers of `path`, each as {channel: (min, max)}."""
+    raw = load_yaml(path)
+    return tuple({channel: (float(lo), float(hi))
+                  for channel, (lo, hi) in (raw.get(tier) or {}).items()}
+                 for tier in ("core", "extended"))
+
+
+_CORE_BOUNDS, _EXTENDED_BOUNDS = load_bounds_file()
 
 # Kept as a public name (data_report and older imports) = the core tier.
 PHYSICAL_BOUNDS = _CORE_BOUNDS

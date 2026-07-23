@@ -1,0 +1,68 @@
+# Fixed physical bounds (min, max) used when a pipeline sets `build.physical_bounds`.
+# Loaded by data/normalization.py -- tune the numbers HERE, never in the code.
+#
+# Why they exist: the alternative is the train-split min/max, which makes the
+# bounds depend on which runs happen to be in the training set. A held-out run
+# whose wind sits outside that range then normalises OUTSIDE [0,1], i.e. the
+# network is asked to extrapolate (see DOC 8.18). A fixed operational envelope,
+# chosen wide enough to CONTAIN the data with margin, keeps every run in range
+# and is airport-independent, so it survives a new delivery unchanged.
+#
+# Two tiers, selected by build.physical_bounds:
+#   true / "core" -> `core` only (position + attitude)
+#   "all"         -> `core` + `extended` (also wind, velocities, rates)
+# A channel absent from the selected tier falls back to the train-split min/max.
+# Position is in metres at the runway threshold, attitude in radians.
+
+core:
+  # attitude (rad) -- sourced envelope: pitch approach, bank CS-25 40 deg max
+  pitch: [-0.35, 0.35]          # ~20 deg   (data ~ +-0.12)
+  bank: [-0.70, 0.70]           # ~40 deg   (data ~ +-0.14)
+  heading_sin: [-1.0, 1.0]      # bounded by construction
+  heading_cos: [-1.0, 1.0]
+
+  # runway-frame position (m): threshold origin, runway-aligned axes
+  pos_along: [-15000.0, 500.0]  # along runway   (data -11933 .. -54)
+  pos_cross: [-500.0, 500.0]    # cross track    (data -113 .. 181)
+  pos_up: [0.0, 1000.0]         # height a/g     (data 21 .. 621)
+
+  # magnetic-frame position (m): geographic axes. North and east SHARE the same
+  # bound -- a runway of arbitrary QFU projects its full length onto both, so
+  # fixing them symmetrically is what makes the frame airport-independent.
+  pos_north_mag: [-15000.0, 15000.0]
+  pos_east_mag: [-15000.0, 15000.0]
+  pos_up_mag: [0.0, 1000.0]
+
+  # local NED position as delivered in the 85-run csv (geographic axes at the
+  # threshold, z positive DOWN). Same symmetry argument as the magnetic frame.
+  x_error_NED: [-15000.0, 15000.0]   # north (data +-10.8 km)
+  y_error_NED: [-15000.0, 15000.0]   # east  (data +-10.9 km)
+  z_error_NED: [-3000.0, 0.0]        # down  (data -2806 .. -16)
+
+  # weight-on-wheels: bounded by construction
+  touchdown_flag: [0.0, 1.0]
+
+extended:
+  # sourced operational envelope from the 737 FCTM / CS-25 (see DOC 8.13), wide
+  # enough to contain a held-out run's wind/velocities.
+  wind_velocity_x: [-20.0, 20.0]     # crosswind/tailwind envelope (m/s)
+  wind_velocity_y: [-20.0, 20.0]
+  wind_velocity_z: [-5.0, 5.0]
+
+  u: [0.0, 120.0]                    # body velocities (m/s)
+  v: [-15.0, 15.0]
+  w: [-10.0, 10.0]
+
+  northsouth_velocity: [-120.0, 120.0]   # NEU velocities (m/s)
+  eastwest_velocity: [-120.0, 120.0]
+  vertical_velocity: [-10.0, 10.0]
+
+  p: [-0.5, 0.5]                     # body rates (rad/s)
+  q: [-0.5, 0.5]
+  r: [-0.5, 0.5]
+
+  # rotational gusts (rad/s). Data: +-0.005, +-0.004, +-0.015; widened to a
+  # round 0.05 so a rougher delivery still normalises inside [0,1].
+  wind_rate_x: [-0.05, 0.05]
+  wind_rate_y: [-0.05, 0.05]
+  wind_rate_z: [-0.05, 0.05]
