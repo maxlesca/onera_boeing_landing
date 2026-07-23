@@ -1,12 +1,23 @@
-# tbd
+# Baseline split (run 8 held out, inherited from base.yaml) at a ten times
+# lower lr. The counterpart of run7_lowlr: that one showed a low lr stabilises
+# the run-7 curve without fixing the extrapolation, so this asks the cheaper
+# question -- does the same lr cost anything IN distribution? If val_loss is as
+# good here as with the baseline lr, a low lr is free and can stay on for the
+# out-of-distribution work.
+#
+# Only the lr changes; every other knob comes from base.yaml, so the comparison
+# against the base run is clean.
+#
+#   make dataset CONFIG=ils_aligned_cfc/run8_lowlr
+#   make train   CONFIG=ils_aligned_cfc/run8_lowlr
 
 extends: base.yaml
 
 training:
   lr: 0.0001
 
-build:              
-  out_dir: datasets/ils_aligned_cfc_run8_lowlr   # same run-7 split as run7_lowlr
+build:
+  out_dir: datasets/ils_aligned_cfc_run8_lowlr   # its own npz (baseline run-8 split)
 
 dataset:
   train_npz: datasets/ils_aligned_cfc_run8_lowlr/landing_train.npz

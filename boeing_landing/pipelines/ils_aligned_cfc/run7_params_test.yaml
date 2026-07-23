@@ -1,4 +1,16 @@
-# tbd
+# Run-7 variant: move every hyperparameter at once, to find out whether the
+# run-7 failure is reachable by tuning at all before spending runs on one knob
+# at a time. Held out: run 7, the wind outlier (DOC 8.18).
+#
+# Seven levers together -- lower lr with more epochs to compensate, gradient
+# clipping, early stopping, longer and more overlapping portions, input noise,
+# more capacity, dropout, mixed memory. That deliberately isolates nothing: it
+# answers "is there any margin here at all?". If it wins, the levers have to be
+# split apart afterwards to know which one did the work.
+#
+#   make dataset CONFIG=ils_aligned_cfc/run7_params_test
+#   make train   CONFIG=ils_aligned_cfc/run7_params_test
+
 extends: base.yaml
 
 training:
@@ -8,21 +20,26 @@ training:
   gradient_clip_val: 1.0     # Indispensable si le LR "rebondit"
   early_stopping_patience: 8
 
-dataset:
-  portion_len: 250        # Séquences plus longues (~10s)
-  stride: 12             # Plus de chevauchement pour multiplier les exemples
-  with_noise: true       # Crucial pour la robustesse en Behavior Cloning
-
 model:
   no_neurons_layer: 128  # Plus de capacité
+  backbone_layers: 2     # REQUIRED by the dropout below: ncps only inserts a
+                         # Dropout *between* backbone layers, so with the
+                         # default single layer backbone_dropout is silently
+                         # ignored (the trap fixed in 8b6fb09 for run7_reg).
   backbone_units: 128
   backbone_dropout: 0.1  # Anti-surapprentissage
   mixed_memory: true     # Combine la stabilité LSTM aux dynamiques CfC
 
 build:
   val_runs: [7]              # run 7 = wind outlier held out
-  out_dir: datasets/ils_aligned_cfc_run7_params_test   # same run-7 split as run7_lowlr
+  out_dir: datasets/ils_aligned_cfc_run7_params_test   # its own npz (run-7 split)
 
+# ONE dataset: block. It used to be written as two, and YAML keeps only the LAST
+# occurrence of a key -- portion_len, stride and with_noise were silently
+# dropped, so the variant was training on the baseline 125/25 without noise.
 dataset:
   train_npz: datasets/ils_aligned_cfc_run7_params_test/landing_train.npz
   val_npz: datasets/ils_aligned_cfc_run7_params_test/landing_val.npz
+  portion_len: 250       # Séquences plus longues (~10s)
+  stride: 12             # Plus de chevauchement pour multiplier les exemples
+  with_noise: true       # Crucial pour la robustesse en Behavior Cloning
