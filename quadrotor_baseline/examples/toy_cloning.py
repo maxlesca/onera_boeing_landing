@@ -9,7 +9,7 @@ Le problème : un chariot 1D (position, vitesse) doit rejoindre l'origine.
   - On entraîne un MLP à l'imiter (les 4 briques PyTorch du DOC §7.6).
   - On teste le MLP EN BOUCLE FERMÉE et on compare à l'expert.
 
-C'est exactement le pipeline de Tudor (drone) et le tien (737), en miniature.
+C'est exactement le pipeline de Tudor (drone) et le tien (747), en miniature.
 Lance :  python toy_cloning.py
 """
 
