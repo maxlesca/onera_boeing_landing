@@ -81,14 +81,11 @@ def _fold_r2(config: dict, ckpt: Path) -> float:
     """Mean R2 over the command channels on the held-out run (scale-invariant, so
     comparable across normalisation methods). NaN channels (constant target, e.g.
     the dead 'directional') are skipped."""
-    from boeing_landing.data.features import LABELS
-    from boeing_landing.evaluate import _val_arrays
+    from boeing_landing.evaluate import _labels, _val_arrays, mean_r2
     from utils.evaluation import evaluate_arrays, regression_metrics
     inputs, outputs = _val_arrays(config)
     yhat, target, _ = evaluate_arrays(config, config["dataloader"], ckpt, inputs, outputs)
-    reg = regression_metrics(yhat, target, LABELS)
-    r2s = [m["r2"] for m in reg["per_channel"].values() if math.isfinite(m["r2"])]
-    return float(statistics.mean(r2s)) if r2s else float("nan")
+    return mean_r2(regression_metrics(yhat, target, _labels(config)))
 
 
 def _build_fold(source: Path, run: int, out_dir: Path, config: dict,

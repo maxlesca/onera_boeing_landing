@@ -31,13 +31,34 @@ def _reorder_inputs(npz, input_order: list[str]):
     return npz["X"][:, idx], npz["x_min"][idx], npz["x_max"][idx]
 
 
+def _portion_starts(n_frames: int, portion_len: int, stride: int) -> range:
+    """Start index of every portion cut from a run of `n_frames`. Single source
+    for the cutting contract: _cut_portions and portion_runs both read it, so
+    the run ids can never drift out of sync with the tensors."""
+    return range(0, n_frames - portion_len + 1, stride)
+
+
 def _cut_portions(x, y, portion_len: int, stride: int):
     """Slide fixed-length portions over one run. x, y are (features, T_run)."""
     xs, ys = [], []
-    for start in range(0, x.shape[1] - portion_len + 1, stride):
+    for start in _portion_starts(x.shape[1], portion_len, stride):
         xs.append(x[:, start:start + portion_len])
         ys.append(y[:, start:start + portion_len])
     return xs, ys
+
+
+def portion_runs(npz_path: str | Path, portion_len: int = 125, stride: int = 25) -> np.ndarray:
+    """Run id of every portion `load_portions` returns, in the same order.
+
+    Only the run column is read, so this is cheap. It is what lets evaluation
+    report one score per validation run instead of one score over all of them
+    mixed together -- the difference between "the recipe does not extrapolate"
+    and "the recipe has not converged".
+    """
+    runs = np.load(npz_path, allow_pickle=True)["run"]
+    return np.array([run for run in np.unique(runs)
+                     for _ in _portion_starts(int((runs == run).sum()), portion_len, stride)],
+                    dtype=np.int32)
 
 
 def _dt_channel(t_run: np.ndarray) -> np.ndarray:
